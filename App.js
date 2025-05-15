@@ -1,12 +1,15 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { registerRootComponent } from 'expo';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import AppNavigator from './src/navigation/AppNavigator';
 
 export default function App() {
   return (
-    <View style={styles.container}>
-      <Text>Open up App.js to start working on your app!</Text>
+    <SafeAreaProvider>
       <StatusBar style="auto" />
-    </View>
+      <AppNavigator />
+    </SafeAreaProvider>
   );
 }
 
@@ -18,3 +21,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
+
+// Rejestrujemy główny komponent aplikacji
+registerRootComponent(App);

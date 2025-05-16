@@ -3,13 +3,16 @@ import { StyleSheet } from 'react-native';
 import { registerRootComponent } from 'expo';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
+import { AuthProvider } from './src/config/AuthContext';
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <StatusBar style="auto" />
-      <AppNavigator />
-    </SafeAreaProvider>
+    <AuthProvider>
+      <SafeAreaProvider>
+        <StatusBar style="auto" />
+        <AppNavigator />
+      </SafeAreaProvider>
+    </AuthProvider>
   );
 }
 

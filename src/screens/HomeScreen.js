@@ -6,13 +6,15 @@ import {
   ScrollView, 
   TouchableOpacity, 
   TextInput,
-  ActivityIndicator
+  ActivityIndicator,
+  Alert
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import RecipeCard from '../components/RecipeCard';
 import { getRecipes, searchRecipesByTitle } from '../services/recipeService';
-import { logout } from '../services/authService';
+import { auth } from '../config/firebase';
 import { COLORS } from '../config/colors';
+import { useAuth } from '../config/AuthContext';
 
 const HomeScreen = ({ navigation }) => {
   const [recipes, setRecipes] = useState([]);
@@ -20,6 +22,8 @@ const HomeScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchActive, setSearchActive] = useState(false);
+  
+  const { currentUser } = useAuth();
 
   // Przykładowe dane do wyświetlenia przed integracją z Firebase
   const sampleRecipes = [
@@ -127,15 +131,25 @@ const HomeScreen = ({ navigation }) => {
     setSearchActive(true);
   };
 
-  // Wylogowanie
+  // Wylogowanie bezpośrednio przez Firebase
   const handleLogout = async () => {
     try {
-      await logout();
-      navigation.navigate('Auth');
+      console.log("Rozpoczynam wylogowywanie...");
+      // Użyj bezpośrednio metody Firebase zamiast funkcji z serwisu
+      await auth.signOut();
+      console.log("Wylogowanie zakończone");
+      
+      // Pokaż alert dla potwierdzenia
+      Alert.alert(
+        "Wylogowano",
+        "Zostałeś pomyślnie wylogowany"
+      );
     } catch (error) {
       console.error("Błąd podczas wylogowywania:", error);
-      // Nawet jeśli jest błąd, wracamy do ekranu logowania
-      navigation.navigate('Auth');
+      Alert.alert(
+        "Błąd wylogowania",
+        "Nie udało się wylogować: " + error.message
+      );
     }
   };
 
@@ -144,9 +158,14 @@ const HomeScreen = ({ navigation }) => {
       <StatusBar style="auto" />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Kucharz App</Text>
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Text style={styles.logoutText}>Wyloguj</Text>
-        </TouchableOpacity>
+        <View style={styles.userInfo}>
+          <Text style={styles.userText}>
+            Witaj, {currentUser?.displayName || currentUser?.email || 'Gość'}
+          </Text>
+          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+            <Text style={styles.logoutText}>Wyloguj</Text>
+          </TouchableOpacity>
+        </View>
       </View>
       
       <View style={styles.searchContainer}>
@@ -275,14 +294,27 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: COLORS.white,
   },
-  logoutButton: {
+  userInfo: {
     position: 'absolute',
     right: 15,
-    top: 50,
+    top: 35,
+    alignItems: 'flex-end',
+  },
+  userText: {
+    color: COLORS.white,
+    fontSize: 12,
+    marginBottom: 5,
+  },
+  logoutButton: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 5,
   },
   logoutText: {
     color: COLORS.white,
-    fontSize: 16,
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   searchContainer: {
     padding: 15,

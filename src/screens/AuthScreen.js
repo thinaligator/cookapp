@@ -23,7 +23,7 @@ const AuthScreen = ({ navigation }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
-
+  
   const toggleMode = () => {
     setIsLogin(!isLogin);
     // Czyścimy pola przy zmianie trybu
@@ -62,9 +62,8 @@ const AuthScreen = ({ navigation }) => {
       }
 
       if (result.success) {
-        // Zapisujemy dane użytkownika w jakiś sposób (można użyć globalnego stanu, AsyncStorage, itd.)
-        // Na razie przechodzimy bezpośrednio do ekranu głównego
-        navigation.navigate('Home');
+        // Przekierowanie do ekranu głównego nastąpi automatycznie przez kontekst uwierzytelniania
+        console.log("Uwierzytelnianie zakończone powodzeniem");
       } else {
         Alert.alert('Błąd', result.error || 'Wystąpił problem z autoryzacją');
       }
@@ -74,12 +73,6 @@ const AuthScreen = ({ navigation }) => {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Funkcja do szybkiego logowania (dla celów testowych)
-  const handleTestLogin = () => {
-    // Symulujemy logowanie bez faktycznego procesu autoryzacji
-    navigation.navigate('Home');
   };
 
   return (
@@ -154,17 +147,6 @@ const AuthScreen = ({ navigation }) => {
               {isLogin ? 'Nie masz konta? Zarejestruj się' : 'Masz już konto? Zaloguj się'}
             </Text>
           </TouchableOpacity>
-
-          {/* Przycisk testowy do szybkiego logowania (bez autoryzacji) */}
-          <TouchableOpacity
-            style={[styles.testButton, loading && styles.disabledButton]}
-            onPress={handleTestLogin}
-            disabled={loading}
-          >
-            <Text style={styles.testButtonText}>
-              Szybkie logowanie (do testów)
-            </Text>
-          </TouchableOpacity>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -236,18 +218,6 @@ const styles = StyleSheet.create({
   switchModeText: {
     color: COLORS.primary,
     fontSize: 16,
-  },
-  testButton: {
-    backgroundColor: COLORS.secondary,
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  testButtonText: {
-    color: COLORS.white,
-    fontSize: 14,
-    fontWeight: 'bold',
   },
 });
 

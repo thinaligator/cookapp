@@ -1,14 +1,4 @@
-import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  signOut, 
-  updateProfile,
-  sendPasswordResetEmail,
-  updateEmail,
-  updatePassword,
-  deleteUser
-} from 'firebase/auth';
-
+import { auth } from '../config/firebase';
 import { createUser } from './userService';
 
 // W tym pliku będziemy używać firebase/auth, ale na razie jest to tylko szkielet
@@ -20,22 +10,16 @@ import { createUser } from './userService';
 // Rejestracja nowego użytkownika
 export const registerWithEmail = async (email, password, displayName) => {
   try {
-    // Placeholder - będzie to faktyczna implementacja rejestracji
-    /*
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const userCredential = await auth.createUserWithEmailAndPassword(email, password);
     const user = userCredential.user;
     
     // Aktualizacja profilu użytkownika
-    await updateProfile(user, { displayName });
+    await user.updateProfile({ displayName });
     
     // Tworzenie dodatkowych danych użytkownika w Firestore
     await createUser(user.uid, { email, displayName });
     
     return { success: true, user };
-    */
-    
-    console.log('Rejestracja użytkownika:', email, displayName);
-    return { success: true, user: { email, displayName, uid: 'temp-user-id' } };
   } catch (error) {
     console.error('Błąd podczas rejestracji:', error);
     return { success: false, error: error.message };
@@ -45,14 +29,8 @@ export const registerWithEmail = async (email, password, displayName) => {
 // Logowanie użytkownika
 export const loginWithEmail = async (email, password) => {
   try {
-    // Placeholder - będzie to faktyczna implementacja logowania
-    /*
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const userCredential = await auth.signInWithEmailAndPassword(email, password);
     return { success: true, user: userCredential.user };
-    */
-    
-    console.log('Logowanie użytkownika:', email);
-    return { success: true, user: { email, uid: 'temp-user-id' } };
   } catch (error) {
     console.error('Błąd podczas logowania:', error);
     return { success: false, error: error.message };
@@ -62,12 +40,12 @@ export const loginWithEmail = async (email, password) => {
 // Wylogowywanie użytkownika
 export const logout = async () => {
   try {
-    // Placeholder - będzie to faktyczna implementacja wylogowania
-    /*
-    await signOut(auth);
-    */
+    console.log("Wywołanie funkcji logout");
+    console.log("Stan auth przed wylogowaniem:", auth.currentUser?.email || "brak zalogowanego użytkownika");
     
-    console.log('Wylogowanie użytkownika');
+    await auth.signOut();
+    console.log("Wylogowanie zakończone, aktualny użytkownik:", auth.currentUser?.email || "brak użytkownika");
+    
     return { success: true };
   } catch (error) {
     console.error('Błąd podczas wylogowania:', error);
@@ -78,12 +56,7 @@ export const logout = async () => {
 // Resetowanie hasła
 export const resetPassword = async (email) => {
   try {
-    // Placeholder - będzie to faktyczna implementacja resetowania hasła
-    /*
-    await sendPasswordResetEmail(auth, email);
-    */
-    
-    console.log('Resetowanie hasła dla:', email);
+    await auth.sendPasswordResetEmail(email);
     return { success: true };
   } catch (error) {
     console.error('Błąd podczas resetowania hasła:', error);
@@ -94,18 +67,12 @@ export const resetPassword = async (email) => {
 // Aktualizacja adresu email
 export const updateUserEmail = async (newEmail) => {
   try {
-    // Placeholder - będzie to faktyczna implementacja aktualizacji email
-    /*
     const user = auth.currentUser;
     if (user) {
-      await updateEmail(user, newEmail);
+      await user.updateEmail(newEmail);
       return { success: true };
     }
     return { success: false, error: 'Użytkownik nie jest zalogowany' };
-    */
-    
-    console.log('Aktualizacja email na:', newEmail);
-    return { success: true };
   } catch (error) {
     console.error('Błąd podczas aktualizacji email:', error);
     return { success: false, error: error.message };
@@ -115,18 +82,12 @@ export const updateUserEmail = async (newEmail) => {
 // Aktualizacja hasła
 export const updateUserPassword = async (newPassword) => {
   try {
-    // Placeholder - będzie to faktyczna implementacja aktualizacji hasła
-    /*
     const user = auth.currentUser;
     if (user) {
-      await updatePassword(user, newPassword);
+      await user.updatePassword(newPassword);
       return { success: true };
     }
     return { success: false, error: 'Użytkownik nie jest zalogowany' };
-    */
-    
-    console.log('Aktualizacja hasła');
-    return { success: true };
   } catch (error) {
     console.error('Błąd podczas aktualizacji hasła:', error);
     return { success: false, error: error.message };
@@ -136,20 +97,24 @@ export const updateUserPassword = async (newPassword) => {
 // Usuwanie konta użytkownika
 export const deleteUserAccount = async () => {
   try {
-    // Placeholder - będzie to faktyczna implementacja usuwania konta
-    /*
     const user = auth.currentUser;
     if (user) {
-      await deleteUser(user);
+      await user.delete();
       return { success: true };
     }
     return { success: false, error: 'Użytkownik nie jest zalogowany' };
-    */
-    
-    console.log('Usuwanie konta użytkownika');
-    return { success: true };
   } catch (error) {
     console.error('Błąd podczas usuwania konta:', error);
     return { success: false, error: error.message };
   }
+};
+
+// Pobranie aktualnego użytkownika
+export const getCurrentUser = () => {
+  return auth.currentUser;
+};
+
+// Nasłuchiwanie na zmiany stanu uwierzytelnienia
+export const subscribeToAuthChanges = (callback) => {
+  return auth.onAuthStateChanged(callback);
 }; 

@@ -9,12 +9,15 @@ import {
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { COLORS } from '../config/colors';
 import { addRecipe } from '../services/recipeService';
 import { useAuth } from '../config/AuthContext';
+import { uploadImage, generateUniqueFilename } from '../services/imageService';
 
 const AddRecipeScreen = ({ navigation }) => {
   const { currentUser } = useAuth();
@@ -24,17 +27,89 @@ const AddRecipeScreen = ({ navigation }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [prepTime, setPrepTime] = useState('');
+  const [cookTime, setCookTime] = useState('');
+  const [servings, setServings] = useState('');
+  const [difficulty, setDifficulty] = useState('');
   const [category, setCategory] = useState('');
   const [ingredients, setIngredients] = useState('');
   const [instructions, setInstructions] = useState('');
   const [tags, setTags] = useState('');
+  const [image, setImage] = useState(null);
 
   // Kategorie
   const CATEGORIES = ['Śniadanie', 'Danie główne', 'Zupa', 'Sałatka', 'Kolacja', 'Deser'];
   
+  // Poziomy trudności
+  const DIFFICULTIES = ['Łatwy', 'Średni', 'Trudny'];
+  
   // Obsługa zmiany kategorii
   const handleCategorySelect = (selectedCategory) => {
     setCategory(selectedCategory);
+  };
+  
+  // Obsługa zmiany poziomu trudności
+  const handleDifficultySelect = (selectedDifficulty) => {
+    setDifficulty(selectedDifficulty);
+  };
+  
+  // Wybieranie zdjęcia z galerii
+  const pickImage = async () => {
+    try {
+      // Poproś o uprawnienia do galerii
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (!permissionResult.granted) {
+        Alert.alert('Brak uprawnień', 'Potrzebujemy dostępu do galerii, aby dodać zdjęcie.');
+        return;
+      }
+      
+      // Otwórz galerię i wybierz zdjęcie
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Błąd podczas wybierania zdjęcia:', error);
+      Alert.alert('Błąd', 'Nie udało się wybrać zdjęcia. Spróbuj ponownie.');
+    }
+  };
+  
+  // Zrobienie zdjęcia aparatem
+  const takePhoto = async () => {
+    try {
+      // Poproś o uprawnienia do aparatu
+      const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+      
+      if (!permissionResult.granted) {
+        Alert.alert('Brak uprawnień', 'Potrzebujemy dostępu do aparatu, aby zrobić zdjęcie.');
+        return;
+      }
+      
+      // Otwórz aparat
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Błąd podczas robienia zdjęcia:', error);
+      Alert.alert('Błąd', 'Nie udało się zrobić zdjęcia. Spróbuj ponownie.');
+    }
+  };
+  
+  // Usunięcie wybranego zdjęcia
+  const removeImage = () => {
+    setImage(null);
   };
   
   // Walidacja formularza
@@ -69,20 +144,42 @@ const AddRecipeScreen = ({ navigation }) => {
     setLoading(true);
     
     try {
+      let imageUrl = '';
+      
+      // Jeśli wybrano zdjęcie, prześlij je do Firebase Storage
+      if (image) {
+        const filename = generateUniqueFilename();
+        imageUrl = await uploadImage(image, 'recipes/', filename);
+      }
+      
+      // Konwersja składników i instrukcji na tablice
+      const ingredientsArray = ingredients
+        .split('\n')
+        .map(item => item.trim())
+        .filter(item => item !== '');
+        
+      const instructionsArray = instructions
+        .split('\n')
+        .map(item => item.trim())
+        .filter(item => item !== '');
+      
       // Przygotowanie danych przepisu
       const recipeData = {
         title: title.trim(),
         description: description.trim(),
-        prepTimeMinutes: parseInt(prepTime) || 0,
+        prepTime: parseInt(prepTime) || 0,
+        cookTime: parseInt(cookTime) || 0,
+        servings: parseInt(servings) || 0,
+        difficulty: difficulty || 'Średni',
         category,
-        ingredients: ingredients.trim(),
-        instructions: instructions.trim(),
+        ingredients: ingredientsArray,
+        instructions: instructionsArray,
         authorId: currentUser?.uid || 'anonymous',
         authorName: currentUser?.displayName || currentUser?.email || 'Użytkownik',
         createdAt: new Date(),
         updatedAt: new Date(),
         tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag),
-        imageUrl: '' // Brak obsługi dodawania zdjęć w tej wersji
+        imageUrl: imageUrl // URL zdjęcia z Firebase Storage
       };
       
       // Dodanie przepisu do bazy danych
@@ -130,6 +227,43 @@ const AddRecipeScreen = ({ navigation }) => {
       <ScrollView style={styles.content}>
         {/* Formularz przepisu */}
         <View style={styles.formSection}>
+          {/* Zdjęcie przepisu */}
+          <View style={styles.imageContainer}>
+            {image ? (
+              <View style={styles.imagePreviewContainer}>
+                <Image source={{ uri: image }} style={styles.imagePreview} />
+                <TouchableOpacity 
+                  style={styles.removeImageButton}
+                  onPress={removeImage}
+                >
+                  <Ionicons name="close-circle" size={24} color={COLORS.white} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.imagePlaceholder}>
+                <Text style={styles.imagePlaceholderText}>Dodaj zdjęcie przepisu</Text>
+              </View>
+            )}
+            
+            <View style={styles.imageButtonsContainer}>
+              <TouchableOpacity 
+                style={[styles.imageButton, styles.galleryButton]} 
+                onPress={pickImage}
+              >
+                <Ionicons name="images" size={18} color={COLORS.white} />
+                <Text style={styles.imageButtonText}>Galeria</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.imageButton, styles.cameraButton]} 
+                onPress={takePhoto}
+              >
+                <Ionicons name="camera" size={18} color={COLORS.white} />
+                <Text style={styles.imageButtonText}>Aparat</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          
           {/* Tytuł */}
           <View style={styles.inputContainer}>
             <Text style={styles.inputLabel}>Tytuł*</Text>
@@ -166,6 +300,56 @@ const AddRecipeScreen = ({ navigation }) => {
               keyboardType="numeric"
               maxLength={3}
             />
+          </View>
+          
+          {/* Czas gotowania */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Czas gotowania (minuty)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Np. 45"
+              value={cookTime}
+              onChangeText={setCookTime}
+              keyboardType="numeric"
+              maxLength={3}
+            />
+          </View>
+          
+          {/* Liczba porcji */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Liczba porcji</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Np. 4"
+              value={servings}
+              onChangeText={setServings}
+              keyboardType="numeric"
+              maxLength={2}
+            />
+          </View>
+          
+          {/* Poziom trudności */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Poziom trudności</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryContainer}>
+              {DIFFICULTIES.map((item, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={[
+                    styles.categoryButton,
+                    difficulty === item ? styles.selectedCategory : null
+                  ]}
+                  onPress={() => handleDifficultySelect(item)}
+                >
+                  <Text style={[
+                    styles.categoryText,
+                    difficulty === item ? styles.selectedCategoryText : null
+                  ]}>
+                    {item}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
           
           {/* Kategoria */}
@@ -257,94 +441,143 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 15,
+    paddingHorizontal: 15,
+    paddingTop: 50,
+    paddingBottom: 10,
     backgroundColor: COLORS.white,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightGrey,
-    paddingTop: 50,
+    borderBottomColor: '#eee',
   },
   backButton: {
-    padding: 10,
-    marginBottom: 5,
+    padding: 5,
   },
   title: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: COLORS.primary,
+    color: COLORS.text,
   },
   placeholder: {
-    width: 34,
+    width: 30,
   },
   content: {
     flex: 1,
-    padding: 20,
+    padding: 15,
   },
   formSection: {
-    backgroundColor: COLORS.white,
-    borderRadius: 10,
-    padding: 15,
     marginBottom: 20,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
   },
   inputContainer: {
-    marginBottom: 20,
+    marginBottom: 15,
   },
   inputLabel: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '500',
-    color: COLORS.text,
     marginBottom: 8,
+    color: COLORS.text,
   },
   input: {
+    backgroundColor: COLORS.white,
     borderWidth: 1,
-    borderColor: COLORS.lightGrey,
+    borderColor: '#ddd',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    color: COLORS.text,
-    backgroundColor: COLORS.white,
   },
   textArea: {
-    minHeight: 120,
+    minHeight: 100,
     textAlignVertical: 'top',
   },
   categoryContainer: {
     flexDirection: 'row',
-    marginBottom: 10,
+    marginVertical: 10,
   },
   categoryButton: {
     paddingHorizontal: 15,
-    paddingVertical: 10,
-    backgroundColor: COLORS.secondary,
+    paddingVertical: 8,
     borderRadius: 20,
+    backgroundColor: '#f0f0f0',
     marginRight: 10,
   },
   categoryText: {
+    fontSize: 14,
     color: COLORS.text,
-    fontWeight: '500',
   },
   selectedCategory: {
     backgroundColor: COLORS.primary,
   },
   selectedCategoryText: {
     color: COLORS.white,
+    fontWeight: '500',
   },
   addButton: {
     backgroundColor: COLORS.primary,
-    paddingVertical: 15,
-    borderRadius: 10,
+    borderRadius: 8,
+    padding: 15,
     alignItems: 'center',
     marginBottom: 30,
   },
   addButtonText: {
     color: COLORS.white,
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '500',
+  },
+  imageContainer: {
+    marginBottom: 20,
+  },
+  imagePlaceholder: {
+    height: 200,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  imagePlaceholderText: {
+    color: COLORS.lightText,
+    fontSize: 16,
+  },
+  imagePreviewContainer: {
+    height: 200,
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 10,
+    position: 'relative',
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 15,
+    padding: 5,
+  },
+  imageButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  imageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    flex: 0.48,
+  },
+  galleryButton: {
+    backgroundColor: COLORS.secondary,
+  },
+  cameraButton: {
+    backgroundColor: COLORS.primary,
+  },
+  imageButtonText: {
+    color: COLORS.white,
+    marginLeft: 5,
+    fontWeight: '500',
   },
 });
 

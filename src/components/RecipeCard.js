@@ -1,14 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import { COLORS } from '../config/colors';
 import { useAuth } from '../config/AuthContext';
 import { useFavorites } from '../config/FavoritesContext';
 import StarRating from './StarRating';
+import { getImageFromCache, cleanupMemoryCache } from '../services/imageCacheService';
 
 const RecipeCard = ({ recipe, onPress }) => {
   const { currentUser } = useAuth();
   const { isFavorite, addFavorite, removeFavorite } = useFavorites();
   const [isRecipeFavorite, setIsRecipeFavorite] = useState(false);
+  const [imageLoading, setImageLoading] = useState(true);
+  const [imageError, setImageError] = useState(false);
+  const [cachedImageUri, setCachedImageUri] = useState(null);
   
   // Sprawdzamy, czy przepis jest w ulubionych przy ładowaniu
   useEffect(() => {
@@ -16,6 +20,25 @@ const RecipeCard = ({ recipe, onPress }) => {
       setIsRecipeFavorite(isFavorite(recipe.id));
     }
   }, [recipe?.id, isFavorite]);
+
+  // Pobierz zdjęcie z cache lub sieci
+  useEffect(() => {
+    const loadCachedImage = async () => {
+      if (recipe?.imageUrl) {
+        try {
+          const cachedUri = await getImageFromCache(recipe.imageUrl);
+          setCachedImageUri(cachedUri);
+          // Czyszczenie pamięci, jeśli jest za duża
+          cleanupMemoryCache();
+        } catch (error) {
+          console.error('Błąd podczas ładowania zdjęcia z cache:', error);
+          setCachedImageUri(recipe.imageUrl); // Użyj oryginalnego URL w przypadku błędu
+        }
+      }
+    };
+    
+    loadCachedImage();
+  }, [recipe?.imageUrl]);
 
   // Obsługa przycisku serduszka
   const handleFavoriteToggle = async (event) => {
@@ -42,17 +65,47 @@ const RecipeCard = ({ recipe, onPress }) => {
 
   return (
     <TouchableOpacity style={styles.container} onPress={onPress}>
-      <View style={styles.imagePlaceholder}>
-        <Text style={styles.placeholderText}>Zdjęcie przepisu</Text>
-        <TouchableOpacity 
-          style={styles.favoriteButton} 
-          onPress={handleFavoriteToggle}
-        >
-          <Text style={styles.favoriteIcon}>
-            {isRecipeFavorite ? '❤️' : '🤍'}
-          </Text>
-        </TouchableOpacity>
-      </View>
+      {cachedImageUri ? (
+        <View style={styles.imageContainer}>
+          {imageLoading && (
+            <View style={styles.imagePlaceholder}>
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            </View>
+          )}
+          <Image 
+            source={{ uri: cachedImageUri }} 
+            style={[
+              styles.recipeImage,
+              imageLoading && { opacity: 0 }
+            ]} 
+            resizeMode="cover"
+            onLoadStart={() => setImageLoading(true)}
+            onLoad={() => setImageLoading(false)}
+            onError={() => {
+              setImageLoading(false);
+              setImageError(true);
+            }}
+          />
+          {imageError && (
+            <View style={[styles.imagePlaceholder, { position: 'absolute' }]}>
+              <Text style={styles.placeholderText}>Błąd</Text>
+            </View>
+          )}
+        </View>
+      ) : (
+        <View style={styles.imagePlaceholder}>
+          <Text style={styles.placeholderText}>Brak zdjęcia</Text>
+        </View>
+      )}
+      
+      <TouchableOpacity 
+        style={styles.favoriteButton} 
+        onPress={handleFavoriteToggle}
+      >
+        <Text style={styles.favoriteIcon}>
+          {isRecipeFavorite ? '❤️' : '🤍'}
+        </Text>
+      </TouchableOpacity>
       
       <View style={styles.infoContainer}>
         <Text style={styles.title} numberOfLines={2}>
@@ -76,11 +129,13 @@ const RecipeCard = ({ recipe, onPress }) => {
         <View style={styles.detailsContainer}>
           <View style={styles.timeAndDifficultyContainer}>
             <Text style={styles.time}>
-              {typeof recipe.prepTime === 'number' && typeof recipe.cookTime === 'number'
+              {recipe.prepTime && recipe.cookTime 
                 ? `${recipe.prepTime + recipe.cookTime} min`
-                : `${recipe.prepTime || 0} + ${recipe.cookTime || 0} min`}
+                : recipe.prepTime 
+                  ? `${recipe.prepTime} min` 
+                  : ''}
             </Text>
-            <Text style={styles.difficulty}>{recipe.difficulty}</Text>
+            <Text style={styles.difficulty}>{recipe.difficulty || ''}</Text>
           </View>
           
           {recipe && recipe.avgRating > 0 && (
@@ -107,12 +162,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 5,
   },
+  imageContainer: {
+    position: 'relative',
+    height: 120,
+    width: '100%',
+  },
   imagePlaceholder: {
     height: 120,
     backgroundColor: COLORS.secondary,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
+  },
+  recipeImage: {
+    height: 120,
+    width: '100%',
   },
   placeholderText: {
     color: COLORS.white,
@@ -127,6 +191,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    borderRadius: 15,
   },
   favoriteIcon: {
     fontSize: 18,
@@ -175,7 +241,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   moreTagsText: {
-    color: COLORS.white,
+    color: COLORS.lightText,
     fontSize: 12,
     fontWeight: '500',
   },

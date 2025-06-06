@@ -13,6 +13,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import RecipeCard from '../components/RecipeCard';
 import { getRecipes, searchRecipesByTitle, getRecipesByTag, updateRecipeTags, getRecipesByCategory } from '../services/recipeService';
+import { getImageFromCache } from '../services/imageCacheService';
 import { COLORS } from '../config/colors';
 import { useAuth } from '../config/AuthContext';
 import { useFavorites } from '../config/FavoritesContext';
@@ -546,6 +547,36 @@ const HomeScreen = ({ navigation }) => {
     setMenuVisible(false);
     navigation.navigate(screenName, params);
   };
+
+  // Po pobraniu przepisów, preloaduj zdjęcia
+  useEffect(() => {
+    const preloadImages = async () => {
+      if (!recipes || recipes.length === 0) return;
+      
+      console.log('Preloadowanie zdjęć przepisów...');
+      
+      // Preloaduj tylko pierwszych 10 zdjęć, aby nie przeciążać pamięci
+      const recipesToPreload = recipes.slice(0, 10);
+      
+      // Rozpocznij preloadowanie w tle
+      const preloadPromises = recipesToPreload
+        .filter(recipe => recipe.imageUrl)
+        .map(recipe => getImageFromCache(recipe.imageUrl));
+      
+      // Czekaj na załadowanie wszystkich zdjęć
+      try {
+        await Promise.all(preloadPromises);
+        console.log('Preloadowanie zdjęć zakończone');
+      } catch (error) {
+        console.error('Błąd podczas preloadowania zdjęć:', error);
+      }
+    };
+    
+    // Wywołaj preloadowanie jeśli mamy przepisy
+    if (recipes && recipes.length > 0) {
+      preloadImages();
+    }
+  }, [recipes]);
 
   return (
     <View style={styles.container}>

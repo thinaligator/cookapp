@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Modal, Image, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { getRecipeById } from '../services/recipeService';
 import { COLORS } from '../config/colors';
@@ -8,6 +8,7 @@ import { useFavorites } from '../config/FavoritesContext';
 import { useReviews } from '../config/ReviewsContext';
 import StarRating from '../components/StarRating';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { getImageFromCache } from '../services/imageCacheService';
 
 // Komponent pojedynczej recenzji
 const ReviewItem = ({ review }) => {
@@ -28,6 +29,9 @@ const RecipeDetailScreen = ({ route, navigation }) => {
   const { recipeId } = route.params || {};
   const [recipe, setRecipe] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [imageLoading, setImageLoading] = useState(true);
+  const [imageError, setImageError] = useState(false);
+  const [cachedImageUri, setCachedImageUri] = useState(null);
   const [userRating, setUserRating] = useState(0);
   const [userComment, setUserComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -98,6 +102,28 @@ const RecipeDetailScreen = ({ route, navigation }) => {
             // Konwertujemy składniki i instrukcje na stringi
             let ingredients = recipeData.ingredients || [];
             let instructions = recipeData.instructions || [];
+            
+            // Sprawdzamy, czy ingredients jest tablicą, jeśli nie - tworzymy pustą tablicę
+            if (!Array.isArray(ingredients)) {
+              console.log('Ingredients nie jest tablicą:', ingredients);
+              ingredients = [];
+              
+              // Jeśli ingredients jest stringiem, próbujemy go podzielić na linie
+              if (typeof recipeData.ingredients === 'string') {
+                ingredients = recipeData.ingredients.split('\n').filter(line => line.trim() !== '');
+              }
+            }
+            
+            // Sprawdzamy, czy instructions jest tablicą, jeśli nie - tworzymy pustą tablicę
+            if (!Array.isArray(instructions)) {
+              console.log('Instructions nie jest tablicą:', instructions);
+              instructions = [];
+              
+              // Jeśli instructions jest stringiem, próbujemy go podzielić na linie
+              if (typeof recipeData.instructions === 'string') {
+                instructions = recipeData.instructions.split('\n').filter(line => line.trim() !== '');
+              }
+            }
             
             // Konwersja składników na stringi, jeśli są obiektami
             ingredients = ingredients.map(ingredient => {
@@ -179,6 +205,25 @@ const RecipeDetailScreen = ({ route, navigation }) => {
 
     fetchRecipeDetails();
   }, [recipeId, currentUser, checkFavorite, setCurrentRecipe]);
+
+  // Pobierz zdjęcie z cache
+  useEffect(() => {
+    const loadCachedImage = async () => {
+      if (recipe?.imageUrl) {
+        try {
+          const cachedUri = await getImageFromCache(recipe.imageUrl);
+          setCachedImageUri(cachedUri);
+        } catch (error) {
+          console.error('Błąd podczas ładowania zdjęcia z cache:', error);
+          setCachedImageUri(recipe.imageUrl); // Użyj oryginalnego URL w przypadku błędu
+        }
+      }
+    };
+    
+    if (recipe) {
+      loadCachedImage();
+    }
+  }, [recipe?.imageUrl]);
 
   const handleGoBack = () => {
     navigation.goBack();
@@ -335,7 +380,8 @@ const RecipeDetailScreen = ({ route, navigation }) => {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <Text>Ładowanie przepisu...</Text>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Ładowanie przepisu...</Text>
       </View>
     );
   }
@@ -353,121 +399,185 @@ const RecipeDetailScreen = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
-      <StatusBar style="auto" />
-      <ScrollView>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={handleGoBack}>
-            <Text style={styles.backButtonText}>← Wróć</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{recipe.title}</Text>
-          <TouchableOpacity style={styles.favoriteButton} onPress={handleFavoriteToggle}>
-            <Text style={[styles.favoriteIcon, isFavorite ? styles.favoriteFilled : styles.favoriteEmpty]}>
-              {isFavorite ? '❤️' : '🤍'}
-            </Text>
-          </TouchableOpacity>
+      <StatusBar style="light" />
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Ładowanie przepisu...</Text>
         </View>
-
-        <View style={styles.imagePlaceholder}>
-          <Text style={styles.imagePlaceholderText}>Zdjęcie przepisu</Text>
-          {recipe.avgRating > 0 && (
-            <View style={styles.ratingBadge}>
-              <StarRating rating={recipe.avgRating} size={14} />
-              <Text style={styles.ratingCount}>({recipe.ratingCount})</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Kategoria */}
-        {recipe.category && (
-          <View style={styles.categoryContainer}>
-            <Text style={styles.categoryLabel}>Kategoria:</Text>
-            <View style={styles.categoryBadge}>
-              <Text style={styles.categoryBadgeText}>{recipe.category}</Text>
-            </View>
+      ) : recipe ? (
+        <ScrollView>
+          {/* Ukrywamy stary header, który już nie jest potrzebny */}
+          
+          {/* Zdjęcie przepisu lub placeholder z nakładką */}
+          <View style={styles.recipeImageSection}>
+            {cachedImageUri ? (
+              <View style={styles.imageContainer}>
+                {imageLoading && (
+                  <View style={styles.imagePlaceholder}>
+                    <ActivityIndicator size="large" color={COLORS.primary} />
+                    <Text style={styles.imagePlaceholderText}>Ładowanie zdjęcia...</Text>
+                  </View>
+                )}
+                <Image 
+                  source={{ uri: cachedImageUri }} 
+                  style={[
+                    styles.recipeImage,
+                    imageLoading && { opacity: 0 } // Ukryj obraz podczas ładowania
+                  ]}
+                  resizeMode="cover"
+                  onLoadStart={() => setImageLoading(true)}
+                  onLoad={() => setImageLoading(false)}
+                  onError={() => {
+                    setImageLoading(false);
+                    setImageError(true);
+                  }}
+                />
+                {imageError && (
+                  <View style={[styles.imagePlaceholder, { position: 'absolute' }]}>
+                    <Text style={styles.imagePlaceholderText}>Nie udało się załadować zdjęcia</Text>
+                  </View>
+                )}
+              </View>
+            ) : (
+              <View style={styles.imagePlaceholder}>
+                <Text style={styles.imagePlaceholderText}>Brak zdjęcia</Text>
+              </View>
+            )}
+            
+            {/* Przycisk powrotu */}
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={handleGoBack}
+            >
+              <Text style={styles.backButtonText}>Wróć</Text>
+            </TouchableOpacity>
+            
+            {/* Przycisk ulubione */}
+            <TouchableOpacity
+              style={styles.favoriteButton}
+              onPress={handleFavoriteToggle}
+            >
+              <Text style={[
+                styles.favoriteIcon,
+                isFavorite ? styles.favoriteFilled : styles.favoriteEmpty
+              ]}>
+                {isFavorite ? '❤️' : '🤍'}
+              </Text>
+            </TouchableOpacity>
+            
+            {/* Znaczek oceny */}
+            {recipe.avgRating > 0 && (
+              <View style={styles.ratingBadge}>
+                <StarRating rating={recipe.avgRating} size={12} />
+                <Text style={styles.ratingCount}>({recipe.ratingCount})</Text>
+              </View>
+            )}
           </View>
-        )}
-
-        {/* Tagi */}
-        {recipe.tags && Array.isArray(recipe.tags) && recipe.tags.length > 0 && (
-          <View style={styles.tagsContainer}>
-            <Text style={styles.tagsHeader}>Tagi:</Text>
-            <View style={styles.tagsList}>
-              {recipe.tags.map((tag, index) => (
-                <View key={`${tag}-${index}`} style={styles.tagItem}>
-                  <Text style={styles.tagText}>{tag}</Text>
+          
+          {/* Informacje o przepisie */}
+          <View style={styles.recipeContent}>
+            {/* Tytuł przepisu */}
+            <Text style={styles.recipeTitle}>{recipe.title}</Text>
+            
+            {/* Kategoria */}
+            <View style={styles.categoryContainer}>
+              <Text style={styles.categoryLabel}>Kategoria:</Text>
+              <View style={styles.categoryBadge}>
+                <Text style={styles.categoryText}>{recipe.category}</Text>
+              </View>
+            </View>
+            
+            {/* Tagi */}
+            {recipe.tags && Array.isArray(recipe.tags) && recipe.tags.length > 0 && (
+              <View style={styles.tagsContainer}>
+                <Text style={styles.tagsHeader}>Tagi:</Text>
+                <View style={styles.tagsList}>
+                  {recipe.tags.map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={styles.tagItem}>
+                      <Text style={styles.tagText}>{tag}</Text>
+                    </View>
+                  ))}
                 </View>
+              </View>
+            )}
+
+            <View style={styles.recipeInfo}>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Czas przygotowania</Text>
+                <Text style={styles.infoValue}>{recipe.prepTime} min</Text>
+              </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Czas gotowania</Text>
+                <Text style={styles.infoValue}>{recipe.cookTime} min</Text>
+              </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Porcje</Text>
+                <Text style={styles.infoValue}>{recipe.servings}</Text>
+              </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Poziom trudności</Text>
+                <Text style={styles.infoValue}>{recipe.difficulty}</Text>
+              </View>
+            </View>
+
+            {/* Składniki */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Składniki</Text>
+              {recipe.ingredients && recipe.ingredients.map((ingredient, index) => (
+                <Text key={index} style={styles.ingredientText}>
+                  • {ingredient}
+                </Text>
               ))}
             </View>
-          </View>
-        )}
 
-        <View style={styles.recipeInfo}>
-          <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>Czas przygotowania</Text>
-            <Text style={styles.infoValue}>{recipe.prepTime} min</Text>
-          </View>
-          <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>Czas gotowania</Text>
-            <Text style={styles.infoValue}>{recipe.cookTime} min</Text>
+            {/* Instrukcje */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Instrukcje</Text>
+              {recipe.instructions && recipe.instructions.map((instruction, index) => (
+                <Text key={index} style={styles.instructionText}>
+                  {index + 1}. {instruction}
+                </Text>
+              ))}
             </View>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>Porcje</Text>
-              <Text style={styles.infoValue}>{recipe.servings}</Text>
-            </View>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>Poziom trudności</Text>
-              <Text style={styles.infoValue}>{recipe.difficulty}</Text>
+
+            {/* Sekcja ocen */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Oceny i opinie</Text>
+              
+              {/* Przycisk oceny */}
+              <TouchableOpacity 
+                style={styles.rateButton} 
+                onPress={openReviewModal}
+              >
+                <Text style={styles.rateButtonText}>
+                  {userReview ? 'Edytuj swoją ocenę' : 'Oceń ten przepis'}
+                </Text>
+              </TouchableOpacity>
+              
+              {/* Lista ocen */}
+              {reviews.length > 0 ? (
+                <View style={styles.reviewsList}>
+                  {reviews.map((review) => (
+                    <ReviewItem key={review.id} review={review} />
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.noReviews}>
+                  Ten przepis nie ma jeszcze ocen. Bądź pierwszy!
+                </Text>
+              )}
             </View>
           </View>
-
-        {/* Składniki */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Składniki</Text>
-          {recipe.ingredients && recipe.ingredients.map((ingredient, index) => (
-            <Text key={index} style={styles.ingredientText}>
-              • {ingredient}
-            </Text>
-            ))}
-          </View>
-
-        {/* Instrukcje */}
-          <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Instrukcje</Text>
-          {recipe.instructions && recipe.instructions.map((instruction, index) => (
-            <Text key={index} style={styles.instructionText}>
-              {index + 1}. {instruction}
-            </Text>
-          ))}
-              </View>
-
-        {/* Sekcja ocen */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Oceny i opinie</Text>
-          
-          {/* Przycisk oceny */}
-          <TouchableOpacity 
-            style={styles.rateButton} 
-            onPress={openReviewModal}
-          >
-            <Text style={styles.rateButtonText}>
-              {userReview ? 'Edytuj swoją ocenę' : 'Oceń ten przepis'}
-            </Text>
+        </ScrollView>
+      ) : (
+        <View style={styles.loadingContainer}>
+          <Text>Nie znaleziono przepisu</Text>
+          <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
+            <Text style={styles.backButtonText}>Wróć do listy przepisów</Text>
           </TouchableOpacity>
-          
-          {/* Lista ocen */}
-          {reviews.length > 0 ? (
-            <View style={styles.reviewsList}>
-              {reviews.map((review) => (
-                <ReviewItem key={review.id} review={review} />
-            ))}
-          </View>
-          ) : (
-            <Text style={styles.noReviews}>
-              Ten przepis nie ma jeszcze ocen. Bądź pierwszy!
-            </Text>
-          )}
         </View>
-      </ScrollView>
+      )}
 
       {/* Modal dodawania/edycji oceny */}
       <Modal
@@ -533,7 +643,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     padding: 16,
     paddingTop: 50,
     zIndex: 10,
@@ -543,12 +653,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: COLORS.white,
     textAlign: 'center',
-    paddingHorizontal: 40,
   },
   backButton: {
+    position: 'absolute',
+    top: 50,
+    left: 15,
     backgroundColor: 'rgba(255, 255, 255, 0.8)',
     borderRadius: 20,
     padding: 10,
+    zIndex: 10,
   },
   backButtonText: {
     color: COLORS.text,
@@ -557,14 +670,14 @@ const styles = StyleSheet.create({
   favoriteButton: {
     position: 'absolute',
     right: 15,
-    top: 50,
-    zIndex: 1,
-    width: 35,
-    height: 35,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 17.5,
+    bottom: 15,
+    width: 40,
+    height: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 10,
   },
   favoriteIcon: {
     fontSize: 22,
@@ -573,33 +686,23 @@ const styles = StyleSheet.create({
     color: 'red',
   },
   favoriteEmpty: {
-    color: 'white',
+    color: COLORS.primary,
+  },
+  imageContainer: {
+    position: 'relative',
+    height: 250,
+    width: '100%',
   },
   imagePlaceholder: {
-    height: 200,
-    backgroundColor: '#e0e0e0',
+    height: 250,
+    backgroundColor: COLORS.secondary,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
   imagePlaceholderText: {
     fontSize: 16,
-    color: COLORS.lightText,
-  },
-  ratingBadge: {
-    position: 'absolute',
-    bottom: 10,
-    right: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-    borderRadius: 15,
-    padding: 5,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  ratingCount: {
-    fontSize: 12,
-    color: COLORS.text,
-    marginLeft: 5,
+    color: COLORS.white,
   },
   recipeInfo: {
     padding: 15,
@@ -754,7 +857,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 20,
   },
-  categoryBadgeText: {
+  categoryText: {
     color: COLORS.white,
     fontWeight: 'bold',
   },
@@ -784,6 +887,45 @@ const styles = StyleSheet.create({
   },
   tagsList: {
     flexDirection: 'row',
+  },
+  recipeImage: {
+    height: 250,
+    width: '100%',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: COLORS.text,
+  },
+  ratingBadge: {
+    position: 'absolute',
+    right: 10,
+    top: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    padding: 5,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  ratingCount: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 5,
+  },
+  recipeContent: {
+    padding: 15,
+  },
+  recipeTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: COLORS.text,
+  },
+  recipeImageSection: {
+    position: 'relative',
+    width: '100%',
+    height: 250,
   },
 });
 

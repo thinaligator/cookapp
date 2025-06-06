@@ -63,9 +63,37 @@ export const getRecipeById = async (recipeId) => {
     const recipeDoc = await getDoc(recipeRef);
     
     if (recipeDoc.exists()) {
+      const recipeData = recipeDoc.data();
+      
+      // Normalizacja składników i instrukcji
+      let ingredients = recipeData.ingredients || [];
+      let instructions = recipeData.instructions || [];
+      
+      // Upewnij się, że składniki są tablicą
+      if (!Array.isArray(ingredients)) {
+        if (typeof ingredients === 'string') {
+          // Jeśli to string, podziel na linie
+          ingredients = ingredients.split('\n').filter(i => i.trim() !== '');
+        } else {
+          ingredients = [];
+        }
+      }
+      
+      // Upewnij się, że instrukcje są tablicą
+      if (!Array.isArray(instructions)) {
+        if (typeof instructions === 'string') {
+          // Jeśli to string, podziel na linie
+          instructions = instructions.split('\n').filter(i => i.trim() !== '');
+        } else {
+          instructions = [];
+        }
+      }
+      
       return {
         id: recipeDoc.id,
-        ...recipeDoc.data()
+        ...recipeData,
+        ingredients,
+        instructions
       };
     } else {
       console.log('Przepis o podanym ID nie istnieje');
@@ -93,6 +121,10 @@ export const addRecipe = async (recipeData) => {
     const recipeWithMetadata = {
       ...recipeData,
       tags: tags,
+      prepTime: recipeData.prepTime || 0,
+      cookTime: recipeData.cookTime || 0,
+      servings: recipeData.servings || 0,
+      difficulty: recipeData.difficulty || 'Średni',
       authorId: recipeData.authorId || 'anonymous',
       authorName: recipeData.authorName || 'Użytkownik',
       createdAt: recipeData.createdAt || serverTimestamp(),

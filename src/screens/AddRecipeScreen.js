@@ -10,7 +10,8 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Image
+  Image,
+  Switch
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -35,6 +36,14 @@ const AddRecipeScreen = ({ navigation }) => {
   const [instructions, setInstructions] = useState('');
   const [tags, setTags] = useState('');
   const [image, setImage] = useState(null);
+  
+  // Dane timera dla kroków
+  const [instructionTimers, setInstructionTimers] = useState([]);
+  const [currentInstruction, setCurrentInstruction] = useState('');
+  const [currentTimerMinutes, setCurrentTimerMinutes] = useState('');
+  const [currentTimerSeconds, setCurrentTimerSeconds] = useState('');
+  const [addTimerToInstruction, setAddTimerToInstruction] = useState(false);
+  const [instructionsList, setInstructionsList] = useState([]);
 
   // Kategorie
   const CATEGORIES = ['Śniadanie', 'Danie główne', 'Zupa', 'Sałatka', 'Kolacja', 'Deser'];
@@ -112,6 +121,86 @@ const AddRecipeScreen = ({ navigation }) => {
     setImage(null);
   };
   
+  // Automatyczne wykrywanie potrzeby timera w instrukcji
+  const detectTimerNeeded = (instruction) => {
+    if (!instruction) return false;
+    
+    // Słowa kluczowe, które mogą wskazywać na potrzebę timera
+    const timerKeywords = [
+      'minut', 'min', 'sekund', 'sek', 'godzin', 'godz',
+      'odczekaj', 'poczekaj', 'pozostaw na', 'gotuj przez',
+      'smaż przez', 'piecz przez', 'gotować przez', 'smażyć przez', 'piec przez'
+    ];
+    
+    // Wykrywanie liczb w instrukcji (np. "5 minut", "10 sekund")
+    const timeRegex = /\b(\d+)\s*(?:minut|min|sekund|sek|godzin|godz)\b/i;
+    const match = instruction.match(timeRegex);
+    
+    if (match) {
+      // Znaleziono czas w instrukcji
+      const timeValue = parseInt(match[1]);
+      
+      // Sprawdzamy, czy jest to czas w minutach czy sekundach
+      const isMinutes = match[0].toLowerCase().includes('min') || 
+                        match[0].toLowerCase().includes('minut') ||
+                        match[0].toLowerCase().includes('godzin') ||
+                        match[0].toLowerCase().includes('godz');
+      
+      if (isMinutes) {
+        setCurrentTimerMinutes(timeValue.toString());
+        setCurrentTimerSeconds('0');
+      } else {
+        setCurrentTimerMinutes('0');
+        setCurrentTimerSeconds(timeValue.toString());
+      }
+      
+      return true;
+    }
+    
+    // Sprawdzamy, czy instrukcja zawiera słowa kluczowe
+    return timerKeywords.some(keyword => 
+      instruction.toLowerCase().includes(keyword.toLowerCase())
+    );
+  };
+  
+  // Modyfikacja obsługi zmiany tekstu instrukcji
+  const handleInstructionChange = (text) => {
+    setCurrentInstruction(text);
+    
+    // Jeśli wykryto potrzebę timera, automatycznie zaznaczamy opcję
+    if (detectTimerNeeded(text)) {
+      setAddTimerToInstruction(true);
+    }
+  };
+  
+  // Obsługa dodawania instrukcji z timerem
+  const handleAddInstruction = () => {
+    if (!currentInstruction.trim()) {
+      Alert.alert('Błąd', 'Wprowadź treść instrukcji');
+      return;
+    }
+    
+    const newInstruction = {
+      text: currentInstruction.trim(),
+      hasTimer: addTimerToInstruction,
+      timerMinutes: addTimerToInstruction ? (parseInt(currentTimerMinutes) || 0) : 0,
+      timerSeconds: addTimerToInstruction ? (parseInt(currentTimerSeconds) || 0) : 0
+    };
+    
+    setInstructionsList([...instructionsList, newInstruction]);
+    setCurrentInstruction('');
+    setCurrentTimerMinutes('');
+    setCurrentTimerSeconds('');
+    setAddTimerToInstruction(false);
+  };
+  
+  // Obsługa usuwania instrukcji
+  const handleRemoveInstruction = (index) => {
+    const updatedInstructions = [...instructionsList];
+    updatedInstructions.splice(index, 1);
+    setInstructionsList(updatedInstructions);
+  };
+  
   // Walidacja formularza
   const validateForm = () => {
     if (!title.trim()) {
@@ -129,7 +218,7 @@ const AddRecipeScreen = ({ navigation }) => {
       return false;
     }
     
-    if (!instructions.trim()) {
+    if (instructionsList.length === 0) {
       Alert.alert('Błąd', 'Dodaj instrukcje przygotowania');
       return false;
     }
@@ -152,13 +241,8 @@ const AddRecipeScreen = ({ navigation }) => {
         imageUrl = await uploadImage(image, 'recipes/', filename);
       }
       
-      // Konwersja składników i instrukcji na tablice
+      // Konwersja składników na tablicę
       const ingredientsArray = ingredients
-        .split('\n')
-        .map(item => item.trim())
-        .filter(item => item !== '');
-        
-      const instructionsArray = instructions
         .split('\n')
         .map(item => item.trim())
         .filter(item => item !== '');
@@ -173,7 +257,7 @@ const AddRecipeScreen = ({ navigation }) => {
         difficulty: difficulty || 'Średni',
         category,
         ingredients: ingredientsArray,
-        instructions: instructionsArray,
+        instructions: instructionsList,
         authorId: currentUser?.uid || 'anonymous',
         authorName: currentUser?.displayName || currentUser?.email || 'Użytkownik',
         createdAt: new Date(),
@@ -389,17 +473,89 @@ const AddRecipeScreen = ({ navigation }) => {
             />
           </View>
           
-          {/* Instrukcje */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Instrukcje przygotowania*</Text>
+          {/* Instrukcje przygotowania z timerem */}
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Instrukcje przygotowania</Text>
+            
+            {/* Lista dodanych instrukcji */}
+            {instructionsList.map((instruction, index) => (
+              <View key={index} style={styles.instructionItem}>
+                <View style={styles.instructionContent}>
+                  <Text style={styles.instructionText}>{`${index + 1}. ${instruction.text}`}</Text>
+                  {instruction.hasTimer && (
+                    <View style={styles.timerInfo}>
+                      <Ionicons name="timer-outline" size={16} color={COLORS.primary} />
+                      <Text style={styles.timerText}>
+                        {`${instruction.timerMinutes} min ${instruction.timerSeconds} sek`}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={styles.removeInstructionButton}
+                  onPress={() => handleRemoveInstruction(index)}
+                >
+                  <Ionicons name="close-circle" size={20} color={COLORS.error} />
+                </TouchableOpacity>
+              </View>
+            ))}
+            
+            {/* Dodawanie nowej instrukcji */}
             <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Opisz krok po kroku przygotowanie potrawy"
-              value={instructions}
-              onChangeText={setInstructions}
+              style={styles.textArea}
+              placeholder="Wprowadź krok przygotowania..."
+              value={currentInstruction}
+              onChangeText={handleInstructionChange}
               multiline
-              maxLength={2000}
             />
+            
+            {/* Opcja dodania timera */}
+            <View style={styles.timerOptionContainer}>
+              <View style={styles.switchContainer}>
+                <Text style={styles.switchLabel}>Dodaj timer do tego kroku</Text>
+                <Switch
+                  value={addTimerToInstruction}
+                  onValueChange={setAddTimerToInstruction}
+                  trackColor={{ false: '#767577', true: COLORS.primaryLight }}
+                  thumbColor={addTimerToInstruction ? COLORS.primary : '#f4f3f4'}
+                />
+              </View>
+              
+              {addTimerToInstruction && (
+                <View style={styles.timerInputsContainer}>
+                  <View style={styles.timerInputGroup}>
+                    <TextInput
+                      style={styles.timerInput}
+                      placeholder="0"
+                      keyboardType="numeric"
+                      value={currentTimerMinutes}
+                      onChangeText={setCurrentTimerMinutes}
+                      maxLength={2}
+                    />
+                    <Text style={styles.timerUnit}>min</Text>
+                  </View>
+                  
+                  <View style={styles.timerInputGroup}>
+                    <TextInput
+                      style={styles.timerInput}
+                      placeholder="0"
+                      keyboardType="numeric"
+                      value={currentTimerSeconds}
+                      onChangeText={setCurrentTimerSeconds}
+                      maxLength={2}
+                    />
+                    <Text style={styles.timerUnit}>sek</Text>
+                  </View>
+                </View>
+              )}
+            </View>
+            
+            <TouchableOpacity
+              style={styles.addInstructionButton}
+              onPress={handleAddInstruction}
+            >
+              <Text style={styles.addInstructionButtonText}>Dodaj krok</Text>
+            </TouchableOpacity>
           </View>
           
           {/* Tagi */}
@@ -577,6 +733,91 @@ const styles = StyleSheet.create({
   imageButtonText: {
     color: COLORS.white,
     marginLeft: 5,
+    fontWeight: '500',
+  },
+  formGroup: {
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 15,
+    fontWeight: '500',
+    marginBottom: 8,
+    color: COLORS.text,
+  },
+  instructionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    backgroundColor: COLORS.lightGrey,
+    borderRadius: 5,
+    padding: 10,
+  },
+  instructionContent: {
+    flex: 1,
+  },
+  instructionText: {
+    fontSize: 14,
+  },
+  removeInstructionButton: {
+    padding: 5,
+  },
+  timerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 5,
+  },
+  timerText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    marginLeft: 5,
+  },
+  timerOptionContainer: {
+    marginTop: 10,
+    marginBottom: 15,
+  },
+  switchContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  switchLabel: {
+    fontSize: 14,
+    color: COLORS.text,
+  },
+  timerInputsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+  },
+  timerInputGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 20,
+  },
+  timerInput: {
+    borderWidth: 1,
+    borderColor: COLORS.lightGrey,
+    borderRadius: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    width: 50,
+    textAlign: 'center',
+    fontSize: 16,
+  },
+  timerUnit: {
+    marginLeft: 5,
+    fontSize: 14,
+    color: COLORS.text,
+  },
+  addInstructionButton: {
+    backgroundColor: COLORS.secondary,
+    padding: 10,
+    borderRadius: 5,
+    alignItems: 'center',
+  },
+  addInstructionButtonText: {
+    color: COLORS.white,
     fontWeight: '500',
   },
 });

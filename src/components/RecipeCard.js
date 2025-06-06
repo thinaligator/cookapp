@@ -93,9 +93,9 @@ const RecipeCard = ({ recipe, onPress }) => {
           )}
         </View>
       ) : (
-        <View style={styles.imagePlaceholder}>
+      <View style={styles.imagePlaceholder}>
           <Text style={styles.placeholderText}>Brak zdjęcia</Text>
-        </View>
+      </View>
       )}
       
       <TouchableOpacity 

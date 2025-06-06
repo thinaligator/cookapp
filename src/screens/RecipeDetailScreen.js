@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Modal, Image, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { getRecipeById } from '../services/recipeService';
@@ -9,6 +9,8 @@ import { useReviews } from '../config/ReviewsContext';
 import StarRating from '../components/StarRating';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { getImageFromCache } from '../services/imageCacheService';
+import KitchenTimer from '../components/KitchenTimer';
+import { useFocusEffect } from '@react-navigation/native';
 
 // Komponent pojedynczej recenzji
 const ReviewItem = ({ review }) => {
@@ -25,7 +27,8 @@ const ReviewItem = ({ review }) => {
   );
 };
 
-const RecipeDetailScreen = ({ route, navigation }) => {
+// Używamy React.memo do zapobiegania niepotrzebnym renderom
+const RecipeDetailScreen = React.memo(({ route, navigation }) => {
   const { recipeId } = route.params || {};
   const [recipe, setRecipe] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -37,6 +40,15 @@ const RecipeDetailScreen = ({ route, navigation }) => {
   const [submitting, setSubmitting] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
+  
+  // Timer state
+  const [timerVisible, setTimerVisible] = useState(false);
+  const [timerTitle, setTimerTitle] = useState('');
+  const [timerMinutes, setTimerMinutes] = useState(0);
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  
+  // Ref do śledzenia, czy dane zostały już załadowane
+  const dataLoadedRef = useRef(false);
   
   const { currentUser } = useAuth();
   const { isFavorite: checkFavorite, addFavorite, removeFavorite } = useFavorites();
@@ -81,149 +93,141 @@ const RecipeDetailScreen = ({ route, navigation }) => {
     ]
   };
 
-  // Pobieramy szczegóły przepisu i sprawdzamy czy jest on w ulubionych
-  useEffect(() => {
-    const fetchRecipeDetails = async () => {
-      if (recipeId) {
-        try {
-          setLoading(true);
-          // Ustawiamy aktualny przepis w ReviewsContext
-          setCurrentRecipe(recipeId);
-          
-          const recipeData = await getRecipeById(recipeId);
-          if (recipeData) {
-            // Debugowanie - sprawdzenie struktury danych
-            console.log('Surowe dane przepisu:', JSON.stringify(recipeData, null, 2));
-            console.log('Typ instrukcji:', typeof recipeData.instructions);
-            if (recipeData.instructions && recipeData.instructions.length > 0) {
-              console.log('Przykładowa instrukcja:', JSON.stringify(recipeData.instructions[0], null, 2));
-            }
-            
-            // Konwertujemy składniki i instrukcje na stringi
-            let ingredients = recipeData.ingredients || [];
-            let instructions = recipeData.instructions || [];
-            
-            // Sprawdzamy, czy ingredients jest tablicą, jeśli nie - tworzymy pustą tablicę
-            if (!Array.isArray(ingredients)) {
-              console.log('Ingredients nie jest tablicą:', ingredients);
-              ingredients = [];
+  // Używamy useFocusEffect zamiast useEffect dla lepszej kontroli nad cyklem życia ekranu
+  useFocusEffect(
+    useCallback(() => {
+      // Pobieramy dane tylko raz po wejściu na ekran
+      if (!dataLoadedRef.current) {
+        const fetchRecipeDetails = async () => {
+          if (recipeId) {
+            try {
+              setLoading(true);
+              // Ustawiamy aktualny przepis w ReviewsContext
+              setCurrentRecipe(recipeId);
               
-              // Jeśli ingredients jest stringiem, próbujemy go podzielić na linie
-              if (typeof recipeData.ingredients === 'string') {
-                ingredients = recipeData.ingredients.split('\n').filter(line => line.trim() !== '');
-              }
-            }
-            
-            // Sprawdzamy, czy instructions jest tablicą, jeśli nie - tworzymy pustą tablicę
-            if (!Array.isArray(instructions)) {
-              console.log('Instructions nie jest tablicą:', instructions);
-              instructions = [];
+              const recipeData = await getRecipeById(recipeId);
               
-              // Jeśli instructions jest stringiem, próbujemy go podzielić na linie
-              if (typeof recipeData.instructions === 'string') {
-                instructions = recipeData.instructions.split('\n').filter(line => line.trim() !== '');
-              }
-            }
-            
-            // Konwersja składników na stringi, jeśli są obiektami
-            ingredients = ingredients.map(ingredient => {
-              if (ingredient && typeof ingredient === 'object' && ingredient.name) {
-                return `${ingredient.name} ${ingredient.amount ? `(${ingredient.amount})` : ''}`;
-              }
-              return String(ingredient);
-            });
-            
-            // Konwersja instrukcji na stringi, sprawdzając różne możliwe formaty
-            instructions = instructions.map(instruction => {
-              console.log('Przetwarzanie instrukcji:', JSON.stringify(instruction));
-              
-              if (instruction === null || instruction === undefined) {
-                return '';
-              }
-              
-              if (typeof instruction === 'string') {
-                return instruction;
-              }
-              
-              if (typeof instruction === 'object') {
-                // Sprawdzamy różne możliwe formaty
-                if (instruction.text) {
-                  return instruction.text;
-                } else if (instruction.step) {
-                  return instruction.step;
-                } else if (instruction.description) {
-                  return instruction.description;
-                } else if (instruction.content) {
-                  return instruction.content;
-                } else {
-                  // Jeśli nie możemy określić formatu, zwracamy jako string JSON
-                  const keys = Object.keys(instruction);
-                  if (keys.length > 0) {
-                    // Spróbuj użyć pierwszego klucza
-                    return instruction[keys[0]] || JSON.stringify(instruction);
+              if (recipeData) {
+                // Konwertujemy składniki i instrukcje na odpowiedni format
+                let ingredients = recipeData.ingredients || [];
+                let instructions = recipeData.instructions || [];
+                
+                if (!Array.isArray(ingredients)) {
+                  ingredients = [];
+                  if (typeof recipeData.ingredients === 'string') {
+                    ingredients = recipeData.ingredients.split('\n').filter(line => line.trim() !== '');
                   }
-                  return JSON.stringify(instruction);
                 }
+                
+                if (!Array.isArray(instructions)) {
+                  instructions = [];
+                  if (typeof recipeData.instructions === 'string') {
+                    instructions = recipeData.instructions.split('\n').filter(line => line.trim() !== '');
+                  }
+                }
+                
+                ingredients = ingredients.map(ingredient => {
+                  if (ingredient && typeof ingredient === 'object' && ingredient.name) {
+                    return `${ingredient.name} ${ingredient.amount ? `(${ingredient.amount})` : ''}`;
+                  }
+                  return String(ingredient);
+                });
+                
+                const processedInstructions = [];
+                for (const instruction of instructions) {
+                  if (instruction === null || instruction === undefined) {
+                    processedInstructions.push({ text: '' });
+                    continue;
+                  }
+                  
+                  if (typeof instruction === 'object' && instruction.hasTimer) {
+                    processedInstructions.push(instruction);
+                    continue;
+                  }
+                  
+                  if (typeof instruction === 'object' && instruction.text) {
+                    processedInstructions.push({ text: instruction.text });
+                    continue;
+                  }
+                  
+                  if (typeof instruction === 'string') {
+                    processedInstructions.push({ text: instruction });
+                    continue;
+                  }
+                  
+                  if (typeof instruction === 'object') {
+                    let instructionText = '';
+                    
+                    if (instruction.step) {
+                      instructionText = instruction.step;
+                    } else if (instruction.description) {
+                      instructionText = instruction.description;
+                    } else if (instruction.content) {
+                      instructionText = instruction.content;
+                    } else {
+                      const keys = Object.keys(instruction);
+                      if (keys.length > 0) {
+                        instructionText = instruction[keys[0]] || JSON.stringify(instruction);
+                      } else {
+                        instructionText = JSON.stringify(instruction);
+                      }
+                    }
+                    
+                    processedInstructions.push({ text: instructionText });
+                  } else {
+                    processedInstructions.push({ text: String(instruction) });
+                  }
+                }
+                
+                const recipeWithDefaults = {
+                  ...recipeData,
+                  ingredients: ingredients,
+                  instructions: processedInstructions,
+                  prepTime: recipeData.prepTime || 0,
+                  cookTime: recipeData.cookTime || 0,
+                  servings: recipeData.servings || 0,
+                  difficulty: recipeData.difficulty || 'Nieznany',
+                  avgRating: recipeData.avgRating || 0,
+                  ratingCount: recipeData.ratingCount || 0
+                };
+                
+                setRecipe(recipeWithDefaults);
+                setIsFavorite(checkFavorite(recipeId));
+                
+                // Ładujemy obrazek jeśli istnieje
+                if (recipeWithDefaults.imageUrl) {
+                  try {
+                    const cachedUri = await getImageFromCache(recipeWithDefaults.imageUrl);
+                    setCachedImageUri(cachedUri);
+                  } catch (error) {
+                    console.error('Błąd podczas ładowania zdjęcia z cache:', error);
+                    setCachedImageUri(recipeWithDefaults.imageUrl);
+                  }
+                }
+              } else {
+                setRecipe(sampleRecipe);
               }
-              
-              return String(instruction);
-            });
-            
-            console.log('Przetworzone instrukcje:', instructions);
-            
-            // Upewniamy się, że dane mają wymagane pola
-            const recipeWithDefaults = {
-              ...recipeData,
-              ingredients: ingredients,
-              instructions: instructions,
-              prepTime: recipeData.prepTime || 0,
-              cookTime: recipeData.cookTime || 0,
-              servings: recipeData.servings || 0,
-              difficulty: recipeData.difficulty || 'Nieznany',
-              avgRating: recipeData.avgRating || 0,
-              ratingCount: recipeData.ratingCount || 0
-            };
-            
-            // Ustawiamy przepis
-            setRecipe(recipeWithDefaults);
-            
-            // Sprawdzamy, czy przepis jest w ulubionych
-            setIsFavorite(checkFavorite(recipeId));
-          } else {
-            // Jeśli nie znaleziono przepisu, używamy danych przykładowych
-            setRecipe(sampleRecipe);
+            } catch (error) {
+              console.error("Błąd podczas pobierania szczegółów przepisu:", error);
+              setRecipe(sampleRecipe);
+            } finally {
+              setLoading(false);
+              // Oznaczamy, że dane zostały załadowane
+              dataLoadedRef.current = true;
+            }
           }
-        } catch (error) {
-          console.error("Błąd podczas pobierania szczegółów przepisu:", error);
-          // W przypadku błędu używamy danych przykładowych
-    setRecipe(sampleRecipe);
-        } finally {
-    setLoading(false);
-        }
-      }
-    };
+        };
 
-    fetchRecipeDetails();
-  }, [recipeId, currentUser, checkFavorite, setCurrentRecipe]);
-
-  // Pobierz zdjęcie z cache
-  useEffect(() => {
-    const loadCachedImage = async () => {
-      if (recipe?.imageUrl) {
-        try {
-          const cachedUri = await getImageFromCache(recipe.imageUrl);
-          setCachedImageUri(cachedUri);
-        } catch (error) {
-          console.error('Błąd podczas ładowania zdjęcia z cache:', error);
-          setCachedImageUri(recipe.imageUrl); // Użyj oryginalnego URL w przypadku błędu
-        }
+        fetchRecipeDetails();
       }
-    };
-    
-    if (recipe) {
-      loadCachedImage();
-    }
-  }, [recipe?.imageUrl]);
+      
+      // Funkcja czyszcząca, gdy ekran traci fokus
+      return () => {
+        // Możemy zresetować flagę, jeśli chcemy załadować dane ponownie po powrocie
+        // dataLoadedRef.current = false;
+      };
+    }, [recipeId, setCurrentRecipe, checkFavorite])
+  );
 
   const handleGoBack = () => {
     navigation.goBack();
@@ -377,6 +381,29 @@ const RecipeDetailScreen = ({ route, navigation }) => {
     setModalVisible(false);
   };
 
+  // Obsługa otwarcia timera
+  const handleOpenTimer = (title, minutes, seconds) => {
+    try {
+      // Upewnij się, że parametry są prawidłowe
+      const safeTitle = title || 'Timer';
+      const safeMinutes = !isNaN(minutes) ? parseInt(minutes, 10) : 0;
+      const safeSeconds = !isNaN(seconds) ? parseInt(seconds, 10) : 0;
+      
+      // Ustaw stan timera
+      setTimerTitle(safeTitle);
+      setTimerMinutes(safeMinutes);
+      setTimerSeconds(safeSeconds);
+      setTimerVisible(true);
+    } catch (error) {
+      console.error('Błąd podczas otwierania timera:', error);
+      // Fallback w przypadku błędu
+      setTimerTitle('Timer');
+      setTimerMinutes(0);
+      setTimerSeconds(0);
+      setTimerVisible(true);
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -396,6 +423,148 @@ const RecipeDetailScreen = ({ route, navigation }) => {
       </View>
     );
   }
+
+  // Renderowanie instrukcji z przyciskiem timera jeśli instrukcja ma timer
+  const renderInstructions = () => {
+    if (!recipe || !recipe.instructions) return null;
+    
+    // Funkcja czyszcząca tekst instrukcji z ewentualnych znaczników specjalnych
+    const cleanInstructionText = (text) => {
+      if (!text) return '';
+      
+      // Usuwamy tylko specjalne znaczniki formatowania, zachowując informacje o czasie
+      return text
+        .replace(/\[TIMER:(\d+):(\d+)\]/g, 'przez $1 min $2 sek') // zamiana [TIMER:5:30] na "przez 5 min 30 sek"
+        .replace(/\(TIMER:\s*(\d+)\s*min\)/g, 'przez $1 min')     // zamiana (TIMER: 5 min) na "przez 5 min"
+        .replace(/\[\s*(\d+)\s*min\]/g, 'przez $1 min')           // zamiana [5 min] na "przez 5 min"
+        .trim();
+    };
+    
+    // Funkcja wykrywająca czas w tekście kroku (np. "15 minut", "10 min")
+    const extractTimeFromStep = (stepText) => {
+      if (!stepText) return null;
+      
+      // Wzorce do wyszukiwania czasu
+      const patterns = [
+        /(\d+)\s*min(ut)?/i,         // 15 minut, 15 min
+        /(\d+)\s*minut[y]?/i,        // 15 minut, 2 minuty
+        /(\d+)\s*godz/i,             // 1 godz, 2 godziny
+        /przez\s+(\d+)\s*min/i,      // przez 15 min
+        /około\s+(\d+)\s*min/i,      // około 15 min
+        /(\d+)-(\d+)\s*min/i,        // 10-15 min
+        /na\s+(\d+)\s*min/i,         // na 5 min
+        /po\s+(\d+)\s*min/i,         // po 10 min
+        /(\d+)\s*sekund/i,           // 30 sekund
+        /(\d+)\s*sek/i,              // 30 sek
+        /odczekaj\s+(\d+)\s*min/i,   // odczekaj 5 min
+        /odczekać\s+(\d+)\s*min/i,   // odczekać 5 min
+        /czekaj\s+(\d+)\s*min/i,     // czekaj 5 min
+        /poczekaj\s+(\d+)\s*min/i,   // poczekaj 5 min
+        /zostaw\s+na\s+(\d+)\s*min/i, // zostaw na 10 min
+        /zostaw\s+(\d+)\s*min/i,     // zostaw 10 min
+        /odstaw\s+na\s+(\d+)\s*min/i, // odstaw na 10 min
+        /gotuj\s+przez\s+(\d+)\s*min/i, // gotuj przez 15 min
+        /gotować\s+przez\s+(\d+)\s*min/i, // gotować przez 15 min
+        /smaż\s+przez\s+(\d+)\s*min/i, // smaż przez 10 min
+        /smażyć\s+przez\s+(\d+)\s*min/i, // smażyć przez 10 min
+        /piecz\s+przez\s+(\d+)\s*min/i, // piecz przez 20 min
+        /piec\s+przez\s+(\d+)\s*min/i, // piec przez 20 min
+        /piec\s+(\d+)\s*min/i,       // piec 20 min
+        /podgrzewaj\s+przez\s+(\d+)\s*min/i, // podgrzewaj przez 5 min
+        /podgrzewać\s+przez\s+(\d+)\s*min/i  // podgrzewać przez 5 min
+      ];
+      
+      try {
+        for (const pattern of patterns) {
+          const match = stepText.match(pattern);
+          if (match) {
+            // Jeśli mamy zakres (np. 10-15 min), bierzemy większą wartość
+            if (match[2] && !isNaN(match[2]) && pattern.toString().includes('-')) {
+              const upperRange = parseInt(match[2], 10);
+              return { minutes: upperRange, seconds: 0 };
+            }
+            
+            // W przeciwnym razie bierzemy znaleziony czas
+            const minutes = parseInt(match[1], 10);
+            
+            // Jeśli znaleźliśmy godziny, konwertujemy na minuty
+            if (pattern.toString().includes('godz')) {
+              return { minutes: minutes * 60, seconds: 0 };
+            }
+            
+            // Jeśli znaleźliśmy sekundy, konwertujemy na minuty i sekundy
+            if (pattern.toString().includes('sekund') || pattern.toString().includes('sek')) {
+              if (minutes >= 60) {
+                return { minutes: Math.floor(minutes / 60), seconds: minutes % 60 };
+              } else {
+                return { minutes: 0, seconds: minutes };
+              }
+            }
+            
+            return { minutes, seconds: 0 };
+          }
+        }
+      } catch (error) {
+        console.error('Błąd podczas wykrywania czasu w kroku:', error);
+      }
+      
+      return null;
+    };
+    
+    // Połącz wszystkie instrukcje w jeden tekst
+    const allInstructionsText = recipe.instructions
+      .map(instruction => cleanInstructionText(instruction.text || ''))
+      .join('\n');
+    
+    // Podziel tekst na linie i odfiltruj puste linie
+    const steps = allInstructionsText
+      .split('\n')
+      .map(step => step.trim())
+      .filter(step => step !== '');
+    
+    return (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Instrukcje przygotowania</Text>
+        
+        {steps.map((step, index) => {
+          // Wykryj czas w kroku
+          const timeInfo = extractTimeFromStep(step);
+          
+          return (
+            <View key={index} style={styles.instructionStep}>
+              <View style={styles.instructionStepContent}>
+                <Text style={styles.instructionStepNumber}>{index + 1}</Text>
+                <Text style={styles.instructionStepText}>{step}</Text>
+              </View>
+              
+              {/* Przycisk timera tylko jeśli krok zawiera informację o czasie */}
+              {timeInfo && (
+                <TouchableOpacity
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: COLORS.white,
+                    borderRadius: 15,
+                    paddingHorizontal: 8,
+                    paddingVertical: 4,
+                    borderWidth: 1,
+                    borderColor: COLORS.primary,
+                    marginLeft: 8,
+                  }}
+                  onPress={() => handleOpenTimer(`Krok ${index + 1}`, timeInfo.minutes, timeInfo.seconds)}
+                >
+                  <Icon name="timer-outline" size={16} color={COLORS.primary} />
+                  <Text style={{fontSize: 12, color: COLORS.primary, marginLeft: 4, fontWeight: '500'}}>
+                    {timeInfo.minutes} min
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -440,7 +609,7 @@ const RecipeDetailScreen = ({ route, navigation }) => {
                 )}
               </View>
             ) : (
-              <View style={styles.imagePlaceholder}>
+        <View style={styles.imagePlaceholder}>
                 <Text style={styles.imagePlaceholderText}>Brak zdjęcia</Text>
               </View>
             )}
@@ -473,8 +642,8 @@ const RecipeDetailScreen = ({ route, navigation }) => {
                 <Text style={styles.ratingCount}>({recipe.ratingCount})</Text>
               </View>
             )}
-          </View>
-          
+        </View>
+
           {/* Informacje o przepisie */}
           <View style={styles.recipeContent}>
             {/* Tytuł przepisu */}
@@ -503,46 +672,40 @@ const RecipeDetailScreen = ({ route, navigation }) => {
             )}
 
             <View style={styles.recipeInfo}>
-              <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>Czas przygotowania</Text>
-                <Text style={styles.infoValue}>{recipe.prepTime} min</Text>
-              </View>
-              <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>Czas gotowania</Text>
-                <Text style={styles.infoValue}>{recipe.cookTime} min</Text>
-              </View>
-              <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>Porcje</Text>
-                <Text style={styles.infoValue}>{recipe.servings}</Text>
-              </View>
-              <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>Poziom trudności</Text>
-                <Text style={styles.infoValue}>{recipe.difficulty}</Text>
-              </View>
+              <View style={styles.infoRow}>
+                <View style={styles.infoItem}>
+                  <Text style={styles.infoLabel}>Czas przygotowania</Text>
+                  <Text style={styles.infoValue}>{recipe.prepTime || 'Brak informacji'}</Text>
+                </View>
+                
+                <View style={styles.infoItem}>
+                  <Text style={styles.infoLabel}>Czas gotowania</Text>
+                  <Text style={styles.infoValue}>{recipe.cookTime || 'Brak informacji'}</Text>
+                </View>
             </View>
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Porcje</Text>
+              <Text style={styles.infoValue}>{recipe.servings}</Text>
+            </View>
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Poziom trudności</Text>
+              <Text style={styles.infoValue}>{recipe.difficulty}</Text>
+            </View>
+          </View>
 
             {/* Składniki */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Składniki</Text>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Składniki</Text>
               {recipe.ingredients && recipe.ingredients.map((ingredient, index) => (
-                <Text key={index} style={styles.ingredientText}>
-                  • {ingredient}
-                </Text>
-              ))}
-            </View>
+                <Text key={index} style={styles.ingredientItem}>• {ingredient}</Text>
+            ))}
+          </View>
 
             {/* Instrukcje */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Instrukcje</Text>
-              {recipe.instructions && recipe.instructions.map((instruction, index) => (
-                <Text key={index} style={styles.instructionText}>
-                  {index + 1}. {instruction}
-                </Text>
-              ))}
-            </View>
+            {renderInstructions()}
 
             {/* Sekcja ocen */}
-            <View style={styles.section}>
+          <View style={styles.section}>
               <Text style={styles.sectionTitle}>Oceny i opinie</Text>
               
               {/* Przycisk oceny */}
@@ -578,6 +741,17 @@ const RecipeDetailScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Timer Modal */}
+      <KitchenTimer
+        visible={timerVisible}
+        onClose={() => setTimerVisible(false)}
+        initialTitle={timerTitle}
+        initialMinutes={timerMinutes}
+        initialSeconds={timerSeconds}
+        autoStart={false}
+        editable={false}
+      />
 
       {/* Modal dodawania/edycji oceny */}
       <Modal
@@ -619,13 +793,13 @@ const RecipeDetailScreen = ({ route, navigation }) => {
                   {submitting ? 'Zapisywanie...' : 'Zapisz ocenę'}
                 </Text>
               </TouchableOpacity>
-            </View>
+              </View>
           </View>
         </View>
       </Modal>
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -707,19 +881,31 @@ const styles = StyleSheet.create({
   recipeInfo: {
     padding: 15,
   },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+  },
   infoItem: {
     width: '48%',
-    marginBottom: 15,
   },
   infoLabel: {
     fontSize: 14,
     color: COLORS.lightText,
+  },
+  infoValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   infoValue: {
     fontSize: 16,
     fontWeight: '500',
     marginTop: 5,
     color: COLORS.text,
+  },
+  mainTimerButton: {
+    padding: 5,
+    marginLeft: 5,
   },
   section: {
     backgroundColor: COLORS.white,
@@ -728,55 +914,67 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     elevation: 2,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 15,
     color: COLORS.text,
   },
-  ingredientText: {
-    fontSize: 16,
-    marginBottom: 10,
-    lineHeight: 22,
-  },
-  instructionText: {
-    fontSize: 16,
-    marginBottom: 10,
-    lineHeight: 22,
-  },
-  // Style dla sekcji ocen
-  reviewForm: {
-    marginBottom: 20,
-    padding: 10,
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-  },
-  reviewFormTitle: {
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 10,
-  },
-  commentInput: {
-    backgroundColor: COLORS.white,
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 10,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    textAlignVertical: 'top',
-    minHeight: 80,
-  },
-  submitButton: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 8,
-    padding: 12,
+  sectionTimerButton: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: COLORS.white,
+    borderRadius: 15,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
   },
-  submitButtonText: {
-    color: COLORS.white,
-    fontSize: 16,
+  sectionTimerText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    marginLeft: 4,
     fontWeight: '500',
+  },
+  ingredientItem: {
+    fontSize: 16,
+    marginBottom: 10,
+    lineHeight: 22,
+  },
+  instructionStep: {
+    flexDirection: 'row',
+    marginBottom: 15,
+    alignItems: 'flex-start',
+    paddingHorizontal: 5,
+  },
+  instructionStepContent: {
+    flexDirection: 'row',
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  instructionStepNumber: {
+    backgroundColor: COLORS.primary,
+    color: COLORS.white,
+    minWidth: 28,
+    height: 28,
+    borderRadius: 14,
+    textAlign: 'center',
+    lineHeight: 28,
+    marginRight: 12,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  instructionStepText: {
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 24,
+    color: COLORS.text,
+    paddingTop: 2,
   },
   reviewsList: {
     marginTop: 10,
@@ -824,9 +1022,10 @@ const styles = StyleSheet.create({
   },
   centeredView: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingTop: 100,
   },
   modalView: {
     backgroundColor: 'white',
@@ -899,8 +1098,8 @@ const styles = StyleSheet.create({
   },
   ratingBadge: {
     position: 'absolute',
-    right: 10,
-    top: 10,
+    left: 10,
+    bottom: 10,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     padding: 5,
     borderRadius: 10,
@@ -926,6 +1125,40 @@ const styles = StyleSheet.create({
     position: 'relative',
     width: '100%',
     height: 250,
+  },
+  reviewForm: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  reviewFormTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 15,
+    color: COLORS.text,
+  },
+  commentInput: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 20,
+    marginBottom: 20,
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  submitButton: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 8,
+    padding: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  submitButtonText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: '500',
   },
 });
 

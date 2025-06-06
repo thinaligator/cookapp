@@ -96,13 +96,13 @@ export const addOrUpdateReview = async (recipeId, userId, reviewDataOrUserName, 
       // Jeśli przekazano pojedyncze parametry (stary format)
       console.log('Otrzymano pojedyncze parametry oceny:', reviewDataOrUserName, ratingOrNull);
       reviewData = {
-        recipeId,
-        userId,
+      recipeId,
+      userId,
         userName: reviewDataOrUserName || 'Użytkownik',
         rating: parseInt(ratingOrNull, 10) || 0,
         comment: commentOrNull || '',
-        updatedAt: serverTimestamp()
-      };
+      updatedAt: serverTimestamp()
+    };
     }
     
     console.log('Zapisuję dane oceny:', reviewData);
@@ -179,7 +179,7 @@ const updateRecipeRating = async (recipeId) => {
     
     const avgRating = totalRating / reviews.length;
     console.log(`Nowa średnia ocena: ${avgRating.toFixed(2)} (${reviews.length} ocen)`);
-    
+      
     // Aktualizujemy dokument przepisu
     await updateDoc(recipeRef, {
       avgRating,

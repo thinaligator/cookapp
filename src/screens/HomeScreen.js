@@ -7,15 +7,71 @@ import {
   TouchableOpacity, 
   TextInput,
   ActivityIndicator,
-  Alert
+  Alert,
+  FlatList
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import RecipeCard from '../components/RecipeCard';
-import { getRecipes, searchRecipesByTitle } from '../services/recipeService';
+import { getRecipes, searchRecipesByTitle, getRecipesByTag, updateRecipeTags, getRecipesByCategory } from '../services/recipeService';
 import { COLORS } from '../config/colors';
 import { useAuth } from '../config/AuthContext';
 import { useFavorites } from '../config/FavoritesContext';
 import { useReviews } from '../config/ReviewsContext';
+import { Ionicons } from '@expo/vector-icons';
+
+// Stałe dla kategorii
+const CATEGORIES = ['Śniadanie', 'Danie główne', 'Zupa', 'Sałatka', 'Kolacja', 'Deser'];
+
+// Dostępne tagi (bez kategorii)
+const AVAILABLE_TAGS = [
+  'wegetariańskie', 'wegańskie', 'bez glutenu', 'bez laktozy', 'keto', 
+  'szybkie', 'dietetyczne', 'na ciepło', 'na zimno', 'słodkie', 'słone', 
+  'ostre', 'łagodne', 'kuchnia włoska', 'kuchnia azjatycka', 'kuchnia polska', 
+  'kuchnia francuska', 'kuchnia meksykańska', 'na imprezę', 'dla dzieci', 
+  'fit', 'comfort food', 'fastfood', 'na grilla'
+];
+
+// Mapowanie słów kluczowych z tytułów na tagi
+const RECIPE_TAG_MAPPING = {
+  'pizza': ['kuchnia włoska', 'fastfood'],
+  'makaron': ['kuchnia włoska'],
+  'spaghetti': ['kuchnia włoska'],
+  'lazania': ['kuchnia włoska'],
+  'risotto': ['kuchnia włoska'],
+  'sushi': ['kuchnia azjatycka', 'na zimno'],
+  'curry': ['kuchnia azjatycka', 'ostre'],
+  'ramen': ['kuchnia azjatycka', 'zupa'],
+  'pad thai': ['kuchnia azjatycka'],
+  'pierogi': ['kuchnia polska'],
+  'bigos': ['kuchnia polska'],
+  'żurek': ['kuchnia polska', 'zupa'],
+  'schabowy': ['kuchnia polska', 'danie główne'],
+  'croissant': ['kuchnia francuska', 'śniadanie'],
+  'quiche': ['kuchnia francuska'],
+  'taco': ['kuchnia meksykańska', 'ostre'],
+  'burrito': ['kuchnia meksykańska', 'ostre'],
+  'burger': ['fastfood'],
+  'frytki': ['fastfood', 'przekąska'],
+  'sałatka': ['dietetyczne', 'fit', 'na zimno'],
+  'ciasto': ['deser', 'słodkie'],
+  'lody': ['deser', 'słodkie'],
+  'czekolada': ['deser', 'słodkie'],
+  'ciasteczka': ['deser', 'słodkie'],
+  'grill': ['na grilla'],
+  'wege': ['wegetariańskie'],
+  'wegańskie': ['wegańskie'],
+  'dieta': ['dietetyczne', 'fit']
+};
+
+// Przykładowe mapowanie kategorii na tagi
+const CATEGORY_TAG_MAPPING = {
+  'Śniadanie': ['na ciepło', 'szybkie'],
+  'Danie główne': ['na ciepło', 'comfort food'],
+  'Zupa': ['na ciepło', 'rozgrzewające'],
+  'Sałatka': ['na zimno', 'fit', 'dietetyczne'],
+  'Kolacja': ['lekkie', 'na ciepło'],
+  'Deser': ['słodkie']
+};
 
 const HomeScreen = ({ navigation }) => {
   const [recipes, setRecipes] = useState([]);
@@ -24,6 +80,7 @@ const HomeScreen = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchActive, setSearchActive] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
+  const [selectedTag, setSelectedTag] = useState(null);
   
   const { currentUser, logout } = useAuth();
   const { favoriteRecipes, loading: favoritesLoading } = useFavorites();
@@ -65,36 +122,129 @@ const HomeScreen = ({ navigation }) => {
     },
   ];
 
+  // Dodawanie przykładowych tagów do przepisów
+  const addSampleTagsToRecipes = useCallback(async (recipesList) => {
+    try {
+      const recipesNeedingTags = recipesList.filter(recipe => !recipe.tags || !Array.isArray(recipe.tags) || recipe.tags.length === 0);
+      
+      if (recipesNeedingTags.length === 0) {
+        console.log('Wszystkie przepisy mają już tagi');
+        return;
+      }
+      
+      console.log(`Dodawanie tagów do ${recipesNeedingTags.length} przepisów...`);
+      
+      for (const recipe of recipesNeedingTags) {
+        let tags = [];
+        
+        // Dodaj tagi na podstawie kategorii
+        if (recipe.category && CATEGORY_TAG_MAPPING[recipe.category]) {
+          tags.push(...CATEGORY_TAG_MAPPING[recipe.category]);
+        }
+        
+        // Dodaj tagi na podstawie tytułu
+        if (recipe.title) {
+          Object.keys(RECIPE_TAG_MAPPING).forEach(keyword => {
+            if (recipe.title.toLowerCase().includes(keyword.toLowerCase())) {
+              tags.push(...RECIPE_TAG_MAPPING[keyword]);
+            }
+          });
+        }
+        
+        // Dodaj domyślne tagi, jeśli nie znaleziono żadnych
+        if (tags.length === 0) {
+          tags.push(AVAILABLE_TAGS[Math.floor(Math.random() * AVAILABLE_TAGS.length)]);
+          tags.push(AVAILABLE_TAGS[Math.floor(Math.random() * AVAILABLE_TAGS.length)]);
+        }
+        
+        // Usuń kategorie z tagów
+        tags = removeCategoriesFromTags(tags);
+        
+        // Usuń duplikaty i ogranicz do 3 tagów
+        const uniqueTags = [...new Set(tags)].slice(0, 3);
+        
+        // Dodaj losowy tag, jeśli po usunięciu kategorii nic nie zostało
+        if (uniqueTags.length === 0) {
+          uniqueTags.push(AVAILABLE_TAGS[Math.floor(Math.random() * AVAILABLE_TAGS.length)]);
+        }
+        
+        console.log(`Dodawanie tagów do przepisu "${recipe.title}": ${uniqueTags.join(', ')}`);
+        
+        // Aktualizuj przepis z tagami
+        const success = await updateRecipeTags(recipe.id, uniqueTags);
+        if (success) {
+          console.log(`Pomyślnie dodano tagi do przepisu "${recipe.title}"`);
+        } else {
+          console.error(`Nie udało się dodać tagów do przepisu "${recipe.title}"`);
+        }
+      }
+      
+      console.log('Zakończono dodawanie tagów do przepisów');
+      
+      // Ponownie pobierz przepisy, aby zobaczyć zaktualizowane tagi
+      console.log('Odświeżanie listy przepisów...');
+      const updatedRecipes = await getRecipes();
+      setRecipes(updatedRecipes);
+      setFilteredRecipes(updatedRecipes);
+      
+    } catch (error) {
+      console.error('Błąd podczas dodawania przykładowych tagów:', error);
+    }
+  }, []);
+
+  // Sortowanie przepisów według ocen (od najwyższej do najniższej)
+  const sortRecipesByRating = useCallback((recipesToSort) => {
+    console.log('Sortowanie przepisów według ocen...');
+    return [...recipesToSort].sort((a, b) => {
+      const aRating = a.avgRating || 0;
+      const bRating = b.avgRating || 0;
+      return bRating - aRating;
+    });
+  }, []);
+
   // Pobieranie przepisów z bazy danych
   const fetchRecipes = useCallback(async () => {
-    try {
       setLoading(true);
-      const recipeData = await getRecipes();
+    try {
+      console.log('Pobieranie przepisów...');
+      let recipesData = await getRecipes();
       
-      // Jeśli nie ma danych z Firebase, używamy przykładowych danych
-      const recipesToUse = recipeData && recipeData.length > 0 ? recipeData : sampleRecipes;
+      // Upewnij się, że każdy przepis ma poprawny format tagów (tablica)
+      recipesData = recipesData.map(recipe => {
+        if (!recipe.tags || !Array.isArray(recipe.tags)) {
+          console.log(`Naprawianie formatu tagów dla przepisu "${recipe.title}"`);
+          return { ...recipe, tags: [] };
+        }
+        return recipe;
+      });
       
-      setRecipes(recipesToUse);
+      console.log(`Pobrano ${recipesData.length} przepisów`);
       
-      // Jeśli mamy aktywne wyszukiwanie lub kategorię, aktualizujemy również filtrowane przepisy
-      if (selectedCategory) {
-        handleCategoryPress(selectedCategory, recipesToUse);
-      } else if (searchActive && searchQuery) {
-        const filtered = recipesToUse.filter(recipe => 
-          recipe.title.toLowerCase().includes(searchQuery.toLowerCase())
-        );
-        setFilteredRecipes(filtered);
+      // Jeśli nie ma przepisów z tagami, dodaj przykładowe tagi
+      const hasAnyTags = recipesData.some(recipe => 
+        recipe.tags && Array.isArray(recipe.tags) && recipe.tags.length > 0
+      );
+      
+      if (!hasAnyTags && recipesData.length > 0) {
+        console.log('Żaden przepis nie ma tagów, dodawanie przykładowych tagów...');
+        await addSampleTagsToRecipes(recipesData);
       } else {
-        setFilteredRecipes(recipesToUse);
+        console.log('Niektóre przepisy już mają tagi');
       }
+      
+      // Posortuj przepisy według ocen (od najwyższej do najniższej)
+      const sortedRecipes = sortRecipesByRating(recipesData);
+      
+      setRecipes(sortedRecipes);
+      setFilteredRecipes(sortedRecipes);
+      
     } catch (error) {
-      console.error("Błąd podczas pobierania przepisów:", error);
-      setRecipes(sampleRecipes);
-      setFilteredRecipes(sampleRecipes);
+      console.error('Błąd podczas pobierania przepisów:', error);
+      Alert.alert('Błąd', 'Wystąpił problem podczas ładowania przepisów.');
     } finally {
       setLoading(false);
     }
-  }, [selectedCategory, searchActive, searchQuery]);
+  }, [addSampleTagsToRecipes, sortRecipesByRating]);
 
   // Nasłuchiwanie zmian ocen
   useEffect(() => {
@@ -113,8 +263,96 @@ const HomeScreen = ({ navigation }) => {
 
   // Początkowe pobieranie przepisów
   useEffect(() => {
-    fetchRecipes();
-  }, [fetchRecipes]);
+    const loadAndDebugRecipes = async () => {
+      await fetchRecipes();
+      
+      // Debug - sprawdź tagi wszystkich przepisów
+      console.log("=== DEBUGGING TAGS ===");
+      recipes.forEach(recipe => {
+        console.log(`Przepis "${recipe.title}":`);
+        console.log(`  Kategoria: ${recipe.category || 'brak'}`);
+        
+        if (recipe.tags && Array.isArray(recipe.tags)) {
+          // Sprawdź, czy tagi zawierają kategorie
+          const tagsWithCategories = recipe.tags.filter(tag => 
+            CATEGORIES.some(cat => tag.toLowerCase().includes(cat.toLowerCase()))
+          );
+          
+          if (tagsWithCategories.length > 0) {
+            console.log(`  UWAGA: Znaleziono tagi zawierające kategorie: ${tagsWithCategories.join(', ')}`);
+          }
+          
+          // Pokaż oczyszczone tagi
+          const cleanTags = removeCategoriesFromTags(recipe.tags);
+          console.log(`  Tagi (${recipe.tags.length}): ${recipe.tags.join(', ')}`);
+          console.log(`  Oczyszczone tagi (${cleanTags.length}): ${cleanTags.join(', ')}`);
+        } else {
+          console.log("  Brak tagów lub nieprawidłowy format");
+          console.log("  Wartość tags:", recipe.tags);
+        }
+      });
+      console.log("=== END DEBUGGING ===");
+      
+      // Czyścimy tagi ze wszystkich przepisów, aby nie zawierały kategorii
+      await cleanAllRecipeTags();
+    };
+    
+    loadAndDebugRecipes();
+  }, [fetchRecipes, cleanAllRecipeTags]);
+
+  // Funkcja do czyszczenia tagów wszystkich przepisów
+  const cleanAllRecipeTags = useCallback(async () => {
+    try {
+      console.log("=== CZYSZCZENIE TAGÓW Z KATEGORII ===");
+      let updatedCount = 0;
+      
+      for (const recipe of recipes) {
+        if (recipe.tags && Array.isArray(recipe.tags)) {
+          // Sprawdź, czy tagi zawierają kategorie
+          const tagsWithCategories = recipe.tags.filter(tag => 
+            CATEGORIES.some(cat => tag.toLowerCase().includes(cat.toLowerCase()))
+          );
+          
+          if (tagsWithCategories.length > 0) {
+            console.log(`Przepis "${recipe.title}" ma tagi zawierające kategorie: ${tagsWithCategories.join(', ')}`);
+            
+            // Czyścimy tagi
+            const cleanTags = removeCategoriesFromTags(recipe.tags);
+            
+            // Dodaj losowy tag, jeśli po usunięciu kategorii nic nie zostało
+            if (cleanTags.length === 0) {
+              const randomTag = AVAILABLE_TAGS[Math.floor(Math.random() * AVAILABLE_TAGS.length)];
+              cleanTags.push(randomTag);
+              console.log(`  Dodano losowy tag: ${randomTag}`);
+            }
+            
+            console.log(`  Oczyszczone tagi: ${cleanTags.join(', ')}`);
+            
+            // Aktualizuj tagi przepisu
+            const success = await updateRecipeTags(recipe.id, cleanTags);
+            if (success) {
+              console.log(`  Pomyślnie zaktualizowano tagi dla przepisu "${recipe.title}"`);
+              updatedCount++;
+            } else {
+              console.error(`  Nie udało się zaktualizować tagów dla przepisu "${recipe.title}"`);
+            }
+          }
+        }
+      }
+      
+      console.log(`=== ZAKOŃCZONO CZYSZCZENIE TAGÓW. ZAKTUALIZOWANO ${updatedCount} PRZEPISÓW ===`);
+      
+      if (updatedCount > 0) {
+        // Odśwież przepisy, jeśli były aktualizacje
+        console.log('Odświeżanie listy przepisów po czyszczeniu tagów...');
+        const updatedRecipes = await getRecipes();
+        setRecipes(updatedRecipes);
+        setFilteredRecipes(updatedRecipes);
+      }
+    } catch (error) {
+      console.error('Błąd podczas czyszczenia tagów:', error);
+    }
+  }, [recipes]);
 
   // Odświeżanie po zmianie oceny
   useEffect(() => {
@@ -124,62 +362,137 @@ const HomeScreen = ({ navigation }) => {
     }
   }, [lastRatingChange, fetchRecipes]);
 
-  // Obsługa wyszukiwania
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      setFilteredRecipes(recipes);
-      setSearchActive(false);
-      setSelectedCategory(null);
-      return;
-    }
-
+  // Obsługa filtrowania po kategorii
+  const handleCategoryPress = async (category) => {
+    console.log(`Kliknięto kategorię: ${category}`);
+    setSelectedCategory(category);
+    setSelectedTag(null);
     setLoading(true);
+    
     try {
-      const results = await searchRecipesByTitle(searchQuery);
-      setFilteredRecipes(results);
+      // Pobieranie przepisów z wybraną kategorią
+      const categoryRecipes = await getRecipesByCategory(category);
+      console.log(`Otrzymano ${categoryRecipes.length} przepisów z kategorii ${category}`);
+      
+      if (categoryRecipes.length === 0) {
+        console.log(`Nie znaleziono przepisów w kategorii: ${category}`);
+        setFilteredRecipes([]);
+        setSearchActive(true);
+        return;
+      }
+      
+      // Sortowanie przepisów według ocen
+      const sortedRecipes = sortRecipesByRating(categoryRecipes);
+      
+      // Aktualizacja filtrowanych przepisów
+      setFilteredRecipes(sortedRecipes);
       setSearchActive(true);
-      setSelectedCategory(null);
     } catch (error) {
-      console.error("Błąd podczas wyszukiwania:", error);
-      // Wyszukiwanie lokalne jako fallback
-      const filtered = recipes.filter(recipe => 
-        recipe.title.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-      setFilteredRecipes(filtered);
+      console.error('Błąd podczas filtrowania po kategorii:', error);
+      setFilteredRecipes([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const clearSearch = () => {
-    setSearchQuery('');
-    setFilteredRecipes(recipes);
-    setSearchActive(false);
+  // Obsługa filtrowania po tagu
+  const handleTagPress = async (tag) => {
+    console.log(`\n\n======= KLIKNIĘTO TAG: ${tag} =======`);
+    setSelectedTag(tag);
     setSelectedCategory(null);
+    setLoading(true);
+    
+    try {
+      // Pobieranie przepisów z wybranym tagiem
+      const taggedRecipes = await getRecipesByTag(tag);
+      console.log(`Otrzymano ${taggedRecipes.length} przepisów po filtracji tagiem ${tag}`);
+      
+      // Sprawdź, czy faktycznie mamy przepisy z tym tagiem
+      if (taggedRecipes.length === 0) {
+        console.log(`Nie znaleziono przepisów z tagiem: ${tag}`);
+        setFilteredRecipes([]);
+        setSearchActive(true);
+        return;
+      }
+      
+      // Sprawdź, które przepisy mają tagi w poprawnym formacie
+      console.log("Sprawdzanie formatów tagów w otrzymanych przepisach:");
+      taggedRecipes.forEach(recipe => {
+        console.log(`Przepis "${recipe.title}":`);
+        console.log(`  tagi: ${typeof recipe.tags}, ${Array.isArray(recipe.tags) ? 'jest tablicą' : 'nie jest tablicą'}`);
+        if (recipe.tags && Array.isArray(recipe.tags)) {
+          console.log(`  zawartość: ${recipe.tags.join(', ')}`);
+          const hasTag = recipe.tags.some(t => t.toLowerCase() === tag.toLowerCase());
+          console.log(`  czy zawiera tag '${tag}': ${hasTag ? 'TAK' : 'NIE'}`);
+        }
+      });
+      
+      // Sprawdzamy, czy każdy przepis faktycznie ma ten tag
+      const verifiedRecipes = taggedRecipes.filter(recipe => 
+        recipe.tags && 
+        Array.isArray(recipe.tags) && 
+        recipe.tags.some(t => t.toLowerCase() === tag.toLowerCase())
+      );
+      
+      console.log(`Po dodatkowej weryfikacji: ${verifiedRecipes.length} przepisów ma tag ${tag}`);
+      
+      if (verifiedRecipes.length === 0) {
+        console.log(`Po weryfikacji nie znaleziono przepisów z tagiem: ${tag}`);
+        setFilteredRecipes([]);
+        setSearchActive(true);
+        return;
+      }
+      
+      // Sortowanie przepisów według ocen
+      const sortedRecipes = sortRecipesByRating(verifiedRecipes);
+      
+      // Tworzymy listę przepisów do wyświetlenia
+      setFilteredRecipes(sortedRecipes);
+      setSearchActive(true);
+      console.log(`Wyświetlanie ${sortedRecipes.length} przepisów z tagiem ${tag}`);
+      console.log("======= ZAKOŃCZONO FILTROWANIE =======\n\n");
+    } catch (error) {
+      console.error("Błąd podczas filtrowania po tagu:", error);
+      setFilteredRecipes([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Obsługa wyszukiwania
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+
+    setLoading(true);
+    setSelectedCategory(null);
+    setSelectedTag(null);
+    
+    try {
+      const searchResults = await searchRecipesByTitle(searchQuery);
+      
+      // Sortowanie wyników wyszukiwania według ocen
+      const sortedResults = sortRecipesByRating(searchResults);
+      
+      setFilteredRecipes(sortedResults);
+      setSearchActive(true);
+    } catch (error) {
+      console.error('Błąd podczas wyszukiwania:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRecipePress = (recipeId) => {
     navigation.navigate('RecipeDetail', { recipeId });
   };
 
-  const handleCategoryPress = (category, recipesList = recipes) => {
-    setSelectedCategory(category);
-    
-    // Filtrujemy przepisy z wybranej kategorii
-    const categoryRecipes = recipesList.filter(recipe => recipe.category === category);
-    
-    // Pobieramy ulubione przepisy z tej kategorii
-    const categoryFavorites = favoriteRecipes.filter(recipe => recipe.category === category);
-    
-    // Tworzymy nową listę, która najpierw zawiera ulubione z kategorii, a następnie pozostałe
-    const filteredIds = categoryFavorites.map(recipe => recipe.id);
-    const nonFavorites = categoryRecipes.filter(recipe => !filteredIds.includes(recipe.id));
-    
-    // Łączymy obie listy
-    const combined = [...categoryFavorites, ...nonFavorites];
-    setFilteredRecipes(combined);
-    
-    setSearchActive(true);
+  // Czyszczenie filtrów
+  const clearFilters = () => {
+    console.log('Czyszczenie filtrów');
+    setSelectedCategory(null);
+    setSelectedTag(null);
+    setFilteredRecipes(recipes);
+    setSearchActive(false);
   };
 
   // Wylogowanie używając funkcji z kontekstu uwierzytelniania
@@ -193,10 +506,10 @@ const HomeScreen = ({ navigation }) => {
         console.log("Wylogowanie zakończone pomyślnie");
       } else {
         console.error("Błąd podczas wylogowywania:", result.error);
-        Alert.alert(
+      Alert.alert(
           "Błąd wylogowania",
           "Nie udało się wylogować: " + result.error
-        );
+      );
       }
     } catch (error) {
       console.error("Nieoczekiwany błąd podczas wylogowywania:", error);
@@ -207,20 +520,88 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
+  // Funkcja usuwająca kategorie z listy tagów
+  const removeCategoriesFromTags = (tags) => {
+    if (!tags || !Array.isArray(tags)) return [];
+    
+    // Zamień kategorie na małe litery dla porównania
+    const categoriesLower = CATEGORIES.map(cat => cat.toLowerCase());
+    
+    // Filtruj tagi, usuwając te, które są kategoriami
+    return tags.filter(tag => 
+      !categoriesLower.includes(tag.toLowerCase()) && 
+      // Usuń również tagi zawierające słowa "danie główne", "zupa" itp.
+      !categoriesLower.some(cat => tag.toLowerCase().includes(cat))
+    );
+  };
+
+  // Otwieranie menu
+  const [menuVisible, setMenuVisible] = useState(false);
+  
+  const toggleMenu = () => {
+    setMenuVisible(!menuVisible);
+  };
+  
+  const navigateToScreen = (screenName, params = {}) => {
+    setMenuVisible(false);
+    navigation.navigate(screenName, params);
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar style="auto" />
+      
+      {/* Nagłówek */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Kucharz App</Text>
-        <View style={styles.userInfo}>
-          <Text style={styles.userText}>
-            Witaj, {currentUser?.displayName || currentUser?.email || 'Gość'}
-          </Text>
-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
             <Text style={styles.logoutText}>Wyloguj</Text>
+        </TouchableOpacity>
+        <Text style={styles.title}>Kucharz</Text>
+        <TouchableOpacity onPress={toggleMenu} style={styles.menuButton}>
+          <View style={styles.menuIconContainer}>
+            <Ionicons name="menu" size={28} color={COLORS.primary} />
+          </View>
+        </TouchableOpacity>
+      </View>
+      
+      {/* Menu boczne */}
+      {menuVisible && (
+        <View style={styles.menuOverlay}>
+          <TouchableOpacity style={styles.menuBackground} onPress={toggleMenu} />
+          <View style={styles.sideMenu}>
+            <View style={styles.menuHeader}>
+              <Text style={styles.menuTitle}>Menu</Text>
+              <TouchableOpacity onPress={toggleMenu} style={styles.closeButton}>
+                <Ionicons name="close" size={24} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.menuItem} 
+              onPress={() => navigateToScreen('Preferences')}
+            >
+              <Ionicons name="settings-outline" size={24} color={COLORS.primary} />
+              <Text style={styles.menuItemText}>Zmień preferencje</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.menuItem} 
+              onPress={() => navigateToScreen('Favorites')}
+            >
+              <Ionicons name="heart-outline" size={24} color={COLORS.primary} />
+              <Text style={styles.menuItemText}>Ulubione przepisy</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.menuItem} 
+              onPress={() => navigateToScreen('AddRecipe')}
+            >
+              <Ionicons name="add-circle-outline" size={24} color={COLORS.primary} />
+              <Text style={styles.menuItemText}>Dodaj przepis</Text>
           </TouchableOpacity>
         </View>
       </View>
+      )}
       
       <View style={styles.searchContainer}>
         <TextInput
@@ -232,7 +613,7 @@ const HomeScreen = ({ navigation }) => {
         />
         <TouchableOpacity 
           style={styles.searchButton} 
-          onPress={searchQuery ? handleSearch : clearSearch}
+          onPress={searchQuery ? handleSearch : clearFilters}
         >
           <Text style={styles.searchButtonText}>
             {searchQuery ? "Szukaj" : "Wyczyść"}
@@ -250,119 +631,143 @@ const HomeScreen = ({ navigation }) => {
           <>
             {searchActive ? (
               <>
-                <View style={styles.resultsHeader}>
-                  <TouchableOpacity onPress={clearSearch} style={styles.backButton}>
+              <View style={styles.resultsHeader}>
+                  <TouchableOpacity onPress={clearFilters} style={styles.backButton}>
                     <Text style={styles.backButtonText}>← Wróć</Text>
                   </TouchableOpacity>
-                  <Text style={styles.resultsText}>
+                <Text style={styles.resultsText}>
                     {selectedCategory 
                       ? `Kategoria: ${selectedCategory}` 
-                      : `Znaleziono ${filteredRecipes.length} przepisów`}
-                  </Text>
-                  <TouchableOpacity onPress={clearSearch}>
-                    <Text style={styles.clearText}>Wyczyść filtry</Text>
-                  </TouchableOpacity>
-                </View>
+                      : selectedTag
+                        ? `Tag: ${selectedTag}`
+                        : `Znaleziono ${filteredRecipes.length} przepisów`}
+                </Text>
+                  <TouchableOpacity onPress={clearFilters}>
+                  <Text style={styles.clearText}>Wyczyść filtry</Text>
+                </TouchableOpacity>
+              </View>
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>
                     {searchQuery 
                       ? 'Wyniki wyszukiwania' 
                       : selectedCategory 
-                        ? `Przepisy z kategorii: ${selectedCategory}` 
-                        : 'Wyniki kategorii'}
+                        ? `Przepisy z kategorii: ${selectedCategory}`
+                        : selectedTag
+                          ? `Przepisy z tagiem: ${selectedTag}`
+                          : 'Wyniki wyszukiwania'}
+              </Text>
+              
+              {filteredRecipes.length > 0 ? (
+                <View style={styles.recipeList}>
+                  {filteredRecipes.map((recipe) => (
+                        <View key={recipe.id} style={styles.recipeCardContainer}>
+                    <RecipeCard 
+                      recipe={recipe}
+                      onPress={() => handleRecipePress(recipe.id)}
+                    />
+                        </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.noRecipes}>
+                  <Text style={styles.noRecipesText}>
+                    Nie znaleziono przepisów odpowiadających kryteriom.
                   </Text>
-                  
-                  {filteredRecipes.length > 0 ? (
-                    <View style={styles.recipeList}>
-                      {filteredRecipes.map((recipe) => (
-                        <RecipeCard 
-                          key={recipe.id}
-                          recipe={recipe}
-                          onPress={() => handleRecipePress(recipe.id)}
-                        />
-                      ))}
-                    </View>
-                  ) : (
-                    <View style={styles.noRecipes}>
-                      <Text style={styles.noRecipesText}>
-                        Nie znaleziono przepisów odpowiadających kryteriom.
-                      </Text>
-                    </View>
-                  )}
+                </View>
+              )}
+            </View>
+            
+                {/* Wyświetlanie informacji o aktualnie wybranym filtrze */}
+                <View style={styles.activeFilterContainer}>
+                  {selectedCategory ? (
+                    <Text style={styles.activeFilterText}>
+                      Kategoria: <Text style={styles.filterHighlight}>{selectedCategory}</Text>
+                    </Text>
+                  ) : selectedTag ? (
+                    <Text style={styles.activeFilterText}>
+                      Tag: <Text style={styles.filterHighlight}>{selectedTag}</Text>
+                    </Text>
+                  ) : null}
+                  <TouchableOpacity onPress={clearFilters} style={styles.clearFilterButton}>
+                    <Text style={styles.clearFilterText}>Wyczyść filtr</Text>
+                  </TouchableOpacity>
                 </View>
               </>
             ) : (
               <>
-                {/* Kategorie - teraz zawsze na górze */}
-                <View style={styles.section}>
+                {/* Kategorie */}
+                <View style={styles.categoriesContainer}>
                   <Text style={styles.sectionTitle}>Kategorie</Text>
-                  <View style={styles.categoryList}>
-                    <TouchableOpacity 
-                      style={styles.categoryItem}
-                      onPress={() => handleCategoryPress('Desery')}
-                    >
-                      <Text style={styles.categoryText}>Desery</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={styles.categoryItem}
-                      onPress={() => handleCategoryPress('Dania główne')}
-                    >
-                      <Text style={styles.categoryText}>Dania główne</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={styles.categoryItem}
-                      onPress={() => handleCategoryPress('Zupy')}
-                    >
-                      <Text style={styles.categoryText}>Zupy</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={styles.categoryItem}
-                      onPress={() => handleCategoryPress('Sałatki')}
-                    >
-                      <Text style={styles.categoryText}>Sałatki</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {CATEGORIES.map((category, index) => (
+                  <TouchableOpacity 
+                        key={index}
+                        style={[
+                          styles.categoryButton,
+                          selectedCategory === category ? styles.selectedCategory : null
+                        ]}
+                        onPress={() => handleCategoryPress(category)}
+                  >
+                        <Text style={[
+                          styles.categoryText,
+                          selectedCategory === category ? styles.selectedCategoryText : null
+                        ]}>
+                          {category}
+                        </Text>
+                  </TouchableOpacity>
+                    ))}
+                  </ScrollView>
                 </View>
                 
-                {/* Ulubione przepisy - pomiędzy kategoriami a wszystkimi przepisami */}
-                {currentUser && favoriteRecipes.length > 0 && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Twoje ulubione przepisy</Text>
-                    <View style={styles.recipeList}>
-                      {favoriteRecipes.map((recipe) => (
-                        <RecipeCard 
-                          key={recipe.id}
-                          recipe={recipe}
-                          onPress={() => handleRecipePress(recipe.id)}
-                        />
-                      ))}
-                    </View>
-                  </View>
-                )}
+                {/* Popularne tagi */}
+                <View style={styles.tagsContainer}>
+                  <Text style={styles.sectionTitle}>Popularne tagi</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {AVAILABLE_TAGS.map((tag, index) => (
+                  <TouchableOpacity 
+                        key={index}
+                        style={[
+                          styles.tagButton,
+                          selectedTag === tag ? styles.selectedTag : null
+                        ]}
+                        onPress={() => handleTagPress(tag)}
+                  >
+                        <Text style={[
+                          styles.tagText,
+                          selectedTag === tag ? styles.selectedTagText : null
+                        ]}>
+                          {tag}
+                        </Text>
+                  </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
                 
-                {/* Wszystkie przepisy - teraz poniżej kategorii i ulubionych */}
+                {/* Wszystkie przepisy - teraz poniżej kategorii, tagów i ulubionych */}
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>Wszystkie przepisy</Text>
-                  
-                  {recipes.length > 0 ? (
-                    <View style={styles.recipeList}>
-                      {recipes.map((recipe) => (
-                        <RecipeCard 
-                          key={recipe.id}
-                          recipe={recipe}
-                          onPress={() => handleRecipePress(recipe.id)}
-                        />
-                      ))}
-                    </View>
-                  ) : (
+                  {loading ? (
+                    <ActivityIndicator size="large" color={COLORS.primary} />
+                  ) : recipes.length === 0 ? (
                     <View style={styles.noRecipes}>
                       <Text style={styles.noRecipesText}>
-                        Brak przepisów do wyświetlenia.
+                        Brak przepisów do wyświetlenia
                       </Text>
                     </View>
+                  ) : (
+                    <View style={styles.recipeList}>
+                      {filteredRecipes.map((recipe) => (
+                        <View key={recipe.id} style={styles.recipeCardContainer}>
+                          <RecipeCard
+                            recipe={recipe}
+                            onPress={() => handleRecipePress(recipe.id)}
+                          />
+                        </View>
+                      ))}
+                    </View>
                   )}
-                </View>
+              </View>
               </>
             )}
           </>
@@ -378,39 +783,100 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   header: {
-    paddingTop: 50,
-    paddingBottom: 15,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
     flexDirection: 'row',
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: COLORS.white,
-  },
-  userInfo: {
-    position: 'absolute',
-    right: 15,
-    top: 35,
-    alignItems: 'flex-end',
-  },
-  userText: {
-    color: COLORS.white,
-    fontSize: 12,
-    marginBottom: 5,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    backgroundColor: COLORS.white,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.lightGrey,
+    paddingTop: 50,
   },
   logoutButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 5,
+    padding: 10,
+    marginBottom: 5,
   },
   logoutText: {
-    color: COLORS.white,
-    fontSize: 12,
+    color: COLORS.primary,
     fontWeight: 'bold',
+    fontSize: 14,
+  },
+  menuButton: {
+    padding: 10,
+    marginBottom: 5,
+    width: 50,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuIconContainer: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+  
+  // Style dla menu
+  menuOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 1000,
+    flexDirection: 'row',
+  },
+  menuBackground: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  sideMenu: {
+    width: '70%',
+    backgroundColor: COLORS.white,
+    paddingTop: 50,
+    paddingHorizontal: 20,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 2, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+  },
+  menuHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 30,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.lightGrey,
+  },
+  menuTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  closeButton: {
+    padding: 5,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.lightGrey,
+  },
+  menuItemText: {
+    fontSize: 18,
+    marginLeft: 15,
+    color: COLORS.text,
   },
   searchContainer: {
     padding: 15,
@@ -471,11 +937,16 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 15,
     color: COLORS.text,
+    paddingLeft: 5,
   },
   recipeList: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
+  },
+  recipeCardContainer: {
+    width: '48%', // Szerokość karty z uwzględnieniem odstępu
+    marginBottom: 20, // Odstęp pionowy między kartami
   },
   noRecipes: {
     padding: 20,
@@ -487,24 +958,27 @@ const styles = StyleSheet.create({
     color: COLORS.lightText,
     fontSize: 16,
   },
-  categoryList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+  categoriesContainer: {
+    marginBottom: 20,
+    paddingLeft: 16,
   },
-  categoryItem: {
-    width: '48%',
-    marginBottom: 10,
-    padding: 20,
+  categoryButton: {
+    padding: 10,
+    marginRight: 10,
     backgroundColor: COLORS.secondary,
-    borderRadius: 10,
-    alignItems: 'center',
-    elevation: 2,
+    borderRadius: 5,
   },
   categoryText: {
     color: COLORS.white,
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  selectedCategory: {
+    backgroundColor: COLORS.primary,
+  },
+  selectedCategoryText: {
+    fontWeight: 'bold',
+    color: COLORS.white,
   },
   backButton: {
     padding: 10,
@@ -512,6 +986,66 @@ const styles = StyleSheet.create({
   backButtonText: {
     color: COLORS.primary,
     fontWeight: 'bold',
+  },
+  tagScrollView: {
+    marginBottom: 10,
+  },
+  tagContainer: {
+    flexDirection: 'row',
+    paddingVertical: 5,
+  },
+  tagItem: {
+    backgroundColor: COLORS.secondary,
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 10,
+  },
+  tagText: {
+    color: COLORS.white,
+    fontWeight: '500',
+    fontSize: 14,
+  },
+  activeFilterContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    marginBottom: 10,
+  },
+  activeFilterText: {
+    fontSize: 14,
+    color: COLORS.text,
+  },
+  filterHighlight: {
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+  clearFilterButton: {
+    padding: 5,
+  },
+  clearFilterText: {
+    color: COLORS.primary,
+    fontWeight: 'bold',
+  },
+  tagsContainer: {
+    marginBottom: 20,
+    paddingLeft: 16,
+  },
+  tagButton: {
+    padding: 10,
+    marginRight: 10,
+    backgroundColor: COLORS.secondary,
+    borderRadius: 5,
+  },
+  selectedTag: {
+    backgroundColor: COLORS.primary,
+  },
+  selectedTagText: {
+    fontWeight: 'bold',
+    color: COLORS.white,
   },
 });
 

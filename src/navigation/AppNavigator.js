@@ -6,6 +6,9 @@ import { createStackNavigator } from '@react-navigation/stack';
 import HomeScreen from '../screens/HomeScreen';
 import RecipeDetailScreen from '../screens/RecipeDetailScreen';
 import AuthScreen from '../screens/AuthScreen';
+import FavoritesScreen from '../screens/FavoritesScreen';
+import PreferencesScreen from '../screens/PreferencesScreen';
+import AddRecipeScreen from '../screens/AddRecipeScreen';
 
 // Importujemy kontekst uwierzytelniania
 import { useAuth } from '../config/AuthContext';
@@ -24,6 +27,9 @@ const AuthenticatedStack = () => {
     >
       <Stack.Screen name="Home" component={HomeScreen} />
       <Stack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
+      <Stack.Screen name="Favorites" component={FavoritesScreen} />
+      <Stack.Screen name="Preferences" component={PreferencesScreen} />
+      <Stack.Screen name="AddRecipe" component={AddRecipeScreen} />
     </Stack.Navigator>
   );
 };

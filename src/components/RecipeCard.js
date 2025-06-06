@@ -59,6 +59,20 @@ const RecipeCard = ({ recipe, onPress }) => {
           {recipe.title}
         </Text>
         
+        {/* Tagi przepisu - maksymalnie 2 */}
+        {recipe.tags && Array.isArray(recipe.tags) && recipe.tags.length > 0 && (
+          <View style={styles.tagsContainer}>
+            {recipe.tags.slice(0, 2).map((tag, index) => (
+              <View key={`${tag}-${index}`} style={styles.tagItem}>
+                <Text style={styles.tagText}>{tag}</Text>
+              </View>
+            ))}
+            {recipe.tags.length > 2 && (
+              <Text style={styles.moreTagsText}>+{recipe.tags.length - 2}</Text>
+            )}
+          </View>
+        )}
+        
         <View style={styles.detailsContainer}>
           <View style={styles.timeAndDifficultyContainer}>
             <Text style={styles.time}>
@@ -83,12 +97,15 @@ const RecipeCard = ({ recipe, onPress }) => {
 
 const styles = StyleSheet.create({
   container: {
-    width: '48%',
+    width: '100%',
     backgroundColor: COLORS.white,
     borderRadius: 10,
     overflow: 'hidden',
-    marginBottom: 15,
-    elevation: 2,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
   },
   imagePlaceholder: {
     height: 120,
@@ -139,6 +156,28 @@ const styles = StyleSheet.create({
   difficulty: {
     fontSize: 12,
     color: COLORS.lightText,
+  },
+  tagsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
+  tagItem: {
+    backgroundColor: COLORS.secondary,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    marginRight: 5,
+  },
+  tagText: {
+    color: COLORS.white,
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  moreTagsText: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: '500',
   },
 });
 

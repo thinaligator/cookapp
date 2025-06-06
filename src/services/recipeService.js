@@ -78,14 +78,25 @@ export const getRecipeById = async (recipeId) => {
 };
 
 // Dodawanie nowego przepisu
-export const addRecipe = async (recipeData, userId, userName) => {
+export const addRecipe = async (recipeData) => {
   try {
+    // Upewnij się, że dane są kompletne
+    if (!recipeData.title || !recipeData.ingredients || !recipeData.instructions) {
+      console.error('Brak wymaganych danych przepisu');
+      return null;
+    }
+    
+    // Upewnij się, że tablica tagów istnieje
+    const tags = recipeData.tags || [];
+    
+    // Przygotuj dane do zapisania
     const recipeWithMetadata = {
       ...recipeData,
-      authorId: userId,
-      authorName: userName,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      tags: tags,
+      authorId: recipeData.authorId || 'anonymous',
+      authorName: recipeData.authorName || 'Użytkownik',
+      createdAt: recipeData.createdAt || serverTimestamp(),
+      updatedAt: recipeData.updatedAt || serverTimestamp(),
       avgRating: 0,
       ratingCount: 0,
       isPublic: true
@@ -94,10 +105,7 @@ export const addRecipe = async (recipeData, userId, userName) => {
     const recipesCollection = collection(db, RECIPES_COLLECTION);
     const docRef = await addDoc(recipesCollection, recipeWithMetadata);
     
-    // Możemy tutaj wywołać dodanie ID przepisu do listy "moich przepisów" użytkownika
-    // Można to zrobić przy użyciu userService
-    // await addToMyRecipes(userId, docRef.id);
-    
+    console.log(`Dodano nowy przepis: ${recipeData.title} (ID: ${docRef.id})`);
     return docRef.id;
   } catch (error) {
     console.error('Błąd podczas dodawania przepisu:', error);
@@ -118,6 +126,47 @@ export const updateRecipe = async (recipeId, recipeData) => {
     return true;
   } catch (error) {
     console.error('Błąd podczas aktualizacji przepisu:', error);
+    return false;
+  }
+};
+
+// Aktualizacja tagów przepisu
+export const updateRecipeTags = async (recipeId, tags) => {
+  try {
+    console.log(`Aktualizacja tagów dla przepisu ${recipeId}: ${JSON.stringify(tags)}`);
+    
+    // Upewnij się, że tags jest tablicą
+    if (!Array.isArray(tags)) {
+      console.error('Tags musi być tablicą');
+      return false;
+    }
+    
+    // Upewnij się, że wszystkie tagi są stringami
+    const validTags = tags.filter(tag => typeof tag === 'string' && tag.trim() !== '');
+    
+    if (validTags.length === 0) {
+      console.warn('Brak prawidłowych tagów do zaktualizowania');
+      return false;
+    }
+    
+    const recipeRef = doc(db, RECIPES_COLLECTION, recipeId);
+    
+    // Najpierw pobierz aktualny przepis
+    const recipeDoc = await getDoc(recipeRef);
+    if (!recipeDoc.exists()) {
+      console.error(`Nie znaleziono przepisu o ID: ${recipeId}`);
+      return false;
+    }
+    
+    // Aktualizuj tylko pole tags
+    await updateDoc(recipeRef, {
+      tags: validTags
+    });
+    
+    console.log(`Tagi zaktualizowane pomyślnie dla przepisu ${recipeId}`);
+    return true;
+  } catch (error) {
+    console.error('Błąd podczas aktualizacji tagów:', error);
     return false;
   }
 };
@@ -157,17 +206,21 @@ export const getUserRecipes = async (userId) => {
   }
 };
 
-// Filtrowanie przepisów według kategorii - uproszczone
-export const getRecipesByCategory = async (categoryId) => {
+// Filtrowanie przepisów według kategorii
+export const getRecipesByCategory = async (category) => {
   try {
+    console.log(`Wyszukiwanie przepisów z kategorii: "${category}"`);
     const recipes = await getRecipes();
     
     // Filtrujemy lokalnie
-    return recipes.filter(recipe => 
-      recipe.categories && recipe.categories.includes(categoryId)
+    const filteredRecipes = recipes.filter(recipe => 
+      recipe.category && recipe.category.toLowerCase() === category.toLowerCase()
     );
+    
+    console.log(`Znaleziono ${filteredRecipes.length} przepisów z kategorii "${category}"`);
+    return filteredRecipes;
   } catch (error) {
-    console.error('Błąd podczas filtrowania przepisów:', error);
+    console.error('Błąd podczas filtrowania przepisów po kategorii:', error);
     return [];
   }
 };
@@ -213,6 +266,57 @@ export const getRecipesByIds = async (recipeIds) => {
     });
   } catch (error) {
     console.error('Błąd podczas pobierania przepisów po ID:', error);
+    return [];
+  }
+};
+
+// Filtrowanie przepisów według tagów - uproszczone
+export const getRecipesByTag = async (tag) => {
+  try {
+    console.log(`===== WYSZUKIWANIE PRZEPISÓW Z TAGIEM "${tag}" =====`);
+    const recipes = await getRecipes();
+    
+    console.log(`Liczba wszystkich przepisów: ${recipes.length}`);
+    
+    // Sprawdź, jakie typy danych mają tagi dla wszystkich przepisów
+    recipes.forEach((recipe, index) => {
+      if (index < 5) { // Wyświetl tylko pierwsze 5 dla czytelności logów
+        console.log(`Przepis "${recipe.title}" - tagi: ${typeof recipe.tags}, ${Array.isArray(recipe.tags) ? 'jest tablicą' : 'nie jest tablicą'}`);
+        if (recipe.tags) {
+          console.log(`  Zawartość: ${JSON.stringify(recipe.tags)}`);
+        }
+      }
+    });
+    
+    // Filtrujemy lokalnie
+    const filteredRecipes = recipes.filter(recipe => {
+      // Sprawdzamy, czy przepis ma tagi i czy są one tablicą
+      if (!recipe.tags || !Array.isArray(recipe.tags)) {
+        return false;
+      }
+      
+      // Sprawdzamy, czy tag jest na liście (bez uwzględniania wielkości liter)
+      const hasTag = recipe.tags.some(recipeTag => 
+        recipeTag.toLowerCase() === tag.toLowerCase()
+      );
+      
+      if (hasTag) {
+        console.log(`Przepis "${recipe.title}" ma tag "${tag}"`);
+      }
+      
+      return hasTag;
+    });
+    
+    console.log(`===== ZNALEZIONO ${filteredRecipes.length} PRZEPISÓW Z TAGIEM "${tag}" =====`);
+    
+    // Wypisz szczegóły znalezionych przepisów
+    filteredRecipes.forEach(recipe => {
+      console.log(`- ${recipe.title}, tagi: ${recipe.tags ? recipe.tags.join(', ') : 'brak'}`);
+    });
+    
+    return filteredRecipes;
+  } catch (error) {
+    console.error('Błąd podczas filtrowania przepisów po tagu:', error);
     return [];
   }
 }; 

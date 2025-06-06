@@ -170,9 +170,9 @@ const RecipeDetailScreen = ({ route, navigation }) => {
         } catch (error) {
           console.error("Błąd podczas pobierania szczegółów przepisu:", error);
           // W przypadku błędu używamy danych przykładowych
-          setRecipe(sampleRecipe);
+    setRecipe(sampleRecipe);
         } finally {
-          setLoading(false);
+    setLoading(false);
         }
       }
     };
@@ -377,15 +377,38 @@ const RecipeDetailScreen = ({ route, navigation }) => {
           )}
         </View>
 
-        <View style={styles.content}>
-          <View style={styles.infoContainer}>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>Czas przygotowania</Text>
-              <Text style={styles.infoValue}>{recipe.prepTime}</Text>
+        {/* Kategoria */}
+        {recipe.category && (
+          <View style={styles.categoryContainer}>
+            <Text style={styles.categoryLabel}>Kategoria:</Text>
+            <View style={styles.categoryBadge}>
+              <Text style={styles.categoryBadgeText}>{recipe.category}</Text>
             </View>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>Czas gotowania</Text>
-              <Text style={styles.infoValue}>{recipe.cookTime}</Text>
+          </View>
+        )}
+
+        {/* Tagi */}
+        {recipe.tags && Array.isArray(recipe.tags) && recipe.tags.length > 0 && (
+          <View style={styles.tagsContainer}>
+            <Text style={styles.tagsHeader}>Tagi:</Text>
+            <View style={styles.tagsList}>
+              {recipe.tags.map((tag, index) => (
+                <View key={`${tag}-${index}`} style={styles.tagItem}>
+                  <Text style={styles.tagText}>{tag}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        <View style={styles.recipeInfo}>
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Czas przygotowania</Text>
+            <Text style={styles.infoValue}>{recipe.prepTime} min</Text>
+          </View>
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Czas gotowania</Text>
+            <Text style={styles.infoValue}>{recipe.cookTime} min</Text>
             </View>
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Porcje</Text>
@@ -397,53 +420,52 @@ const RecipeDetailScreen = ({ route, navigation }) => {
             </View>
           </View>
 
-          {/* Składniki */}
+        {/* Składniki */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Składniki</Text>
-            {recipe.ingredients && recipe.ingredients.map((ingredient, index) => (
-              <Text key={index} style={styles.ingredientText}>
-                • {ingredient}
-              </Text>
+          {recipe.ingredients && recipe.ingredients.map((ingredient, index) => (
+            <Text key={index} style={styles.ingredientText}>
+              • {ingredient}
+            </Text>
             ))}
           </View>
 
-          {/* Instrukcje */}
+        {/* Instrukcje */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Instrukcje</Text>
-            {recipe.instructions && recipe.instructions.map((instruction, index) => (
-              <Text key={index} style={styles.instructionText}>
-                {index + 1}. {instruction}
-              </Text>
-            ))}
-          </View>
-
-          {/* Sekcja ocen */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Oceny i opinie</Text>
-            
-            {/* Przycisk oceny */}
-            <TouchableOpacity 
-              style={styles.rateButton} 
-              onPress={openReviewModal}
-            >
-              <Text style={styles.rateButtonText}>
-                {userReview ? 'Edytuj swoją ocenę' : 'Oceń ten przepis'}
-              </Text>
-            </TouchableOpacity>
-            
-            {/* Lista ocen */}
-            {reviews.length > 0 ? (
-              <View style={styles.reviewsList}>
-                {reviews.map((review) => (
-                  <ReviewItem key={review.id} review={review} />
-                ))}
+          <Text style={styles.sectionTitle}>Instrukcje</Text>
+          {recipe.instructions && recipe.instructions.map((instruction, index) => (
+            <Text key={index} style={styles.instructionText}>
+              {index + 1}. {instruction}
+            </Text>
+          ))}
               </View>
-            ) : (
-              <Text style={styles.noReviews}>
-                Ten przepis nie ma jeszcze ocen. Bądź pierwszy!
-              </Text>
-            )}
+
+        {/* Sekcja ocen */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Oceny i opinie</Text>
+          
+          {/* Przycisk oceny */}
+          <TouchableOpacity 
+            style={styles.rateButton} 
+            onPress={openReviewModal}
+          >
+            <Text style={styles.rateButtonText}>
+              {userReview ? 'Edytuj swoją ocenę' : 'Oceń ten przepis'}
+            </Text>
+          </TouchableOpacity>
+          
+          {/* Lista ocen */}
+          {reviews.length > 0 ? (
+            <View style={styles.reviewsList}>
+              {reviews.map((review) => (
+                <ReviewItem key={review.id} review={review} />
+            ))}
           </View>
+          ) : (
+            <Text style={styles.noReviews}>
+              Ten przepis nie ma jeszcze ocen. Bądź pierwszy!
+            </Text>
+          )}
         </View>
       </ScrollView>
 
@@ -506,12 +528,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   header: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 16,
     paddingTop: 50,
-    paddingBottom: 15,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
+    zIndex: 10,
   },
   headerTitle: {
     fontSize: 22,
@@ -521,15 +546,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   backButton: {
-    position: 'absolute',
-    left: 15,
-    top: 50,
-    zIndex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    borderRadius: 20,
+    padding: 10,
   },
   backButtonText: {
-    color: COLORS.white,
-    fontSize: 18,
-    fontWeight: '500',
+    color: COLORS.text,
+    fontWeight: 'bold',
   },
   favoriteButton: {
     position: 'absolute',
@@ -578,18 +601,8 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     marginLeft: 5,
   },
-  content: {
+  recipeInfo: {
     padding: 15,
-  },
-  infoContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.white,
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 20,
-    elevation: 2,
   },
   infoItem: {
     width: '48%',
@@ -723,6 +736,54 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 10,
     right: 10,
+  },
+  categoryContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  categoryLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginRight: 10,
+    color: COLORS.text,
+  },
+  categoryBadge: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  categoryBadgeText: {
+    color: COLORS.white,
+    fontWeight: 'bold',
+  },
+  tagsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    backgroundColor: COLORS.white,
+  },
+  tagItem: {
+    backgroundColor: COLORS.secondary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
+    marginRight: 8,
+  },
+  tagText: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  tagsHeader: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: COLORS.text,
+  },
+  tagsList: {
+    flexDirection: 'row',
   },
 });
 

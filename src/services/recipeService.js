@@ -24,10 +24,18 @@ export const getRecipes = async (limitCount = 20) => {
     const recipesCollection = collection(db, RECIPES_COLLECTION);
     const recipesSnapshot = await getDocs(recipesCollection);
     
-    return recipesSnapshot.docs.map(doc => ({
+    const recipes = recipesSnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     }));
+    
+    // Sortujemy przepisy według oceny (od najwyższej do najniższej)
+    // Przepisy bez oceny (avgRating undefined lub 0) będą na końcu
+    return recipes.sort((a, b) => {
+      const ratingA = a.avgRating || 0;
+      const ratingB = b.avgRating || 0;
+      return ratingB - ratingA;
+    });
   } catch (error) {
     console.error('Błąd podczas pobierania przepisów:', error);
     return [];
@@ -175,6 +183,36 @@ export const searchRecipesByTitle = async (searchTerm) => {
     );
   } catch (error) {
     console.error('Błąd podczas wyszukiwania przepisów:', error);
+    return [];
+  }
+};
+
+// Pobieranie przepisów po ID
+export const getRecipesByIds = async (recipeIds) => {
+  try {
+    if (!recipeIds || recipeIds.length === 0) {
+      return [];
+    }
+
+    const recipesCollection = collection(db, RECIPES_COLLECTION);
+    const recipesSnapshot = await getDocs(recipesCollection);
+    
+    // Filtrujemy lokalnie, aby znaleźć przepisy o podanych ID
+    const recipes = recipesSnapshot.docs
+      .map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }))
+      .filter(recipe => recipeIds.includes(recipe.id));
+    
+    // Sortujemy przepisy według oceny (od najwyższej do najniższej)
+    return recipes.sort((a, b) => {
+      const ratingA = a.avgRating || 0;
+      const ratingB = b.avgRating || 0;
+      return ratingB - ratingA;
+    });
+  } catch (error) {
+    console.error('Błąd podczas pobierania przepisów po ID:', error);
     return [];
   }
 }; 

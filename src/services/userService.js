@@ -125,4 +125,18 @@ export const isRecipeFavorite = async (uid, recipeId) => {
     console.error('Błąd podczas sprawdzania ulubionych:', error);
     return false;
   }
+};
+
+// Pobieranie listy ID ulubionych przepisów użytkownika
+export const getUserFavoriteIds = async (uid) => {
+  try {
+    const userData = await getUserData(uid);
+    if (userData && userData.favoriteRecipes) {
+      return userData.favoriteRecipes;
+    }
+    return [];
+  } catch (error) {
+    console.error('Błąd podczas pobierania ID ulubionych przepisów:', error);
+    return [];
+  }
 }; 

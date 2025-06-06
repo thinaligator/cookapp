@@ -21,17 +21,23 @@ const RECIPES_COLLECTION = 'recipes';
 // Pobieranie wszystkich ocen dla przepisu
 export const getReviewsForRecipe = async (recipeId) => {
   try {
+    // Używamy prostego zapytania bez sortowania, żeby uniknąć problemów z indeksami
     const reviewsQuery = query(
       collection(db, REVIEWS_COLLECTION),
-      where("recipeId", "==", recipeId),
-      orderBy("createdAt", "desc")
+      where("recipeId", "==", recipeId)
     );
     
     const reviewsSnapshot = await getDocs(reviewsQuery);
-    return reviewsSnapshot.docs.map(doc => ({
+    const reviews = reviewsSnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     }));
+    
+    // Sortujemy lokalnie po dacie (od najnowszych)
+    return reviews.sort((a, b) => {
+      if (!a.createdAt || !b.createdAt) return 0;
+      return b.createdAt.seconds - a.createdAt.seconds;
+    });
   } catch (error) {
     console.error('Błąd podczas pobierania ocen przepisu:', error);
     return [];
@@ -65,39 +71,62 @@ export const getUserReviewForRecipe = async (recipeId, userId) => {
 };
 
 // Dodawanie nowej oceny (lub aktualizacja istniejącej)
-export const addOrUpdateReview = async (recipeId, userId, userName, rating, comment) => {
+export const addOrUpdateReview = async (recipeId, userId, reviewDataOrUserName, ratingOrNull, commentOrNull) => {
   try {
+    console.log('Dodawanie/aktualizacja oceny:', recipeId, userId);
+    
     // Sprawdzanie czy użytkownik już ocenił ten przepis
     const existingReview = await getUserReviewForRecipe(recipeId, userId);
     
-    // Przygotowanie danych oceny
-    const reviewData = {
-      recipeId,
-      userId,
-      userName,
-      rating,
-      comment,
-      updatedAt: serverTimestamp()
-    };
+    let reviewData;
+    
+    // Sprawdzamy, czy przekazano obiekt reviewData czy pojedyncze parametry
+    if (typeof reviewDataOrUserName === 'object') {
+      // Jeśli przekazano obiekt, używamy go bezpośrednio
+      console.log('Otrzymano obiekt oceny:', reviewDataOrUserName);
+      reviewData = {
+        recipeId,
+        userId,
+        userName: reviewDataOrUserName.userName || 'Użytkownik',
+        rating: parseInt(reviewDataOrUserName.rating, 10) || 0,
+        comment: reviewDataOrUserName.comment || '',
+        updatedAt: serverTimestamp()
+      };
+    } else {
+      // Jeśli przekazano pojedyncze parametry (stary format)
+      console.log('Otrzymano pojedyncze parametry oceny:', reviewDataOrUserName, ratingOrNull);
+      reviewData = {
+        recipeId,
+        userId,
+        userName: reviewDataOrUserName || 'Użytkownik',
+        rating: parseInt(ratingOrNull, 10) || 0,
+        comment: commentOrNull || '',
+        updatedAt: serverTimestamp()
+      };
+    }
+    
+    console.log('Zapisuję dane oceny:', reviewData);
     
     if (existingReview) {
       // Aktualizacja istniejącej oceny
+      console.log('Aktualizacja istniejącej oceny:', existingReview.id);
       const reviewRef = doc(db, REVIEWS_COLLECTION, existingReview.id);
       await updateDoc(reviewRef, reviewData);
       
       // Aktualizacja średniej oceny przepisu
-      await updateRecipeRating(recipeId, rating, false);
+      await updateRecipeRating(recipeId);
       
       return existingReview.id;
     } else {
       // Dodanie nowej oceny
+      console.log('Dodawanie nowej oceny');
       reviewData.createdAt = serverTimestamp();
       
       const reviewsCollection = collection(db, REVIEWS_COLLECTION);
       const docRef = await addDoc(reviewsCollection, reviewData);
       
       // Aktualizacja średniej oceny przepisu
-      await updateRecipeRating(recipeId, rating, true);
+      await updateRecipeRating(recipeId);
       
       return docRef.id;
     }
@@ -108,13 +137,13 @@ export const addOrUpdateReview = async (recipeId, userId, userName, rating, comm
 };
 
 // Usuwanie oceny
-export const deleteReview = async (reviewId, recipeId, rating) => {
+export const deleteReview = async (reviewId, recipeId) => {
   try {
     const reviewRef = doc(db, REVIEWS_COLLECTION, reviewId);
     await deleteDoc(reviewRef);
     
     // Aktualizacja średniej oceny przepisu
-    await updateRecipeRatingOnDelete(recipeId, rating);
+    await updateRecipeRating(recipeId);
     
     return true;
   } catch (error) {
@@ -123,73 +152,43 @@ export const deleteReview = async (reviewId, recipeId, rating) => {
   }
 };
 
-// Pomocnicza funkcja do aktualizacji średniej oceny przepisu przy dodaniu/aktualizacji oceny
-const updateRecipeRating = async (recipeId, newRating, isNewReview) => {
+// Funkcja do aktualizacji średniej oceny przepisu
+const updateRecipeRating = async (recipeId) => {
   try {
+    console.log('Aktualizacja oceny przepisu:', recipeId);
     const recipeRef = doc(db, RECIPES_COLLECTION, recipeId);
     
-    await runTransaction(db, async (transaction) => {
-      const recipeDoc = await transaction.get(recipeRef);
-      if (!recipeDoc.exists()) {
-        throw "Przepis nie istnieje!";
-      }
-      
-      const recipeData = recipeDoc.data();
-      const oldRatingTotal = recipeData.avgRating * recipeData.ratingCount;
-      
-      let newRatingCount = recipeData.ratingCount;
-      if (isNewReview) {
-        newRatingCount += 1;
-      }
-      
-      // Obliczanie nowej średniej
-      const newAvgRating = (oldRatingTotal + newRating) / newRatingCount;
-      
-      // Aktualizacja dokumentu przepisu
-      transaction.update(recipeRef, {
-        avgRating: newAvgRating,
-        ratingCount: newRatingCount
+    // Pobieramy wszystkie oceny przepisu
+    const reviews = await getReviewsForRecipe(recipeId);
+    
+    if (reviews.length === 0) {
+      // Jeśli nie ma ocen, ustawiamy średnią na 0
+      console.log('Brak ocen, ustawiam avgRating=0');
+      await updateDoc(recipeRef, {
+        avgRating: 0,
+        ratingCount: 0
       });
+      return true;
+    }
+    
+    // Obliczamy średnią ocenę
+    const totalRating = reviews.reduce((sum, review) => {
+      const rating = review.rating || 0;
+      return sum + rating;
+    }, 0);
+    
+    const avgRating = totalRating / reviews.length;
+    console.log(`Nowa średnia ocena: ${avgRating.toFixed(2)} (${reviews.length} ocen)`);
+    
+    // Aktualizujemy dokument przepisu
+    await updateDoc(recipeRef, {
+      avgRating,
+      ratingCount: reviews.length
     });
     
     return true;
   } catch (error) {
     console.error('Błąd podczas aktualizacji oceny przepisu:', error);
-    return false;
-  }
-};
-
-// Pomocnicza funkcja do aktualizacji średniej oceny przepisu przy usunięciu oceny
-const updateRecipeRatingOnDelete = async (recipeId, deletedRating) => {
-  try {
-    const recipeRef = doc(db, RECIPES_COLLECTION, recipeId);
-    
-    await runTransaction(db, async (transaction) => {
-      const recipeDoc = await transaction.get(recipeRef);
-      if (!recipeDoc.exists()) {
-        throw "Przepis nie istnieje!";
-      }
-      
-      const recipeData = recipeDoc.data();
-      const oldRatingTotal = recipeData.avgRating * recipeData.ratingCount;
-      const newRatingCount = recipeData.ratingCount - 1;
-      
-      // Jeśli to była ostatnia ocena, resetujemy średnią do 0
-      let newAvgRating = 0;
-      if (newRatingCount > 0) {
-        newAvgRating = (oldRatingTotal - deletedRating) / newRatingCount;
-      }
-      
-      // Aktualizacja dokumentu przepisu
-      transaction.update(recipeRef, {
-        avgRating: newAvgRating,
-        ratingCount: newRatingCount
-      });
-    });
-    
-    return true;
-  } catch (error) {
-    console.error('Błąd podczas aktualizacji oceny przepisu po usunięciu:', error);
     return false;
   }
 }; 

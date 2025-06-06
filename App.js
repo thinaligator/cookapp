@@ -4,14 +4,20 @@ import { registerRootComponent } from 'expo';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
 import { AuthProvider } from './src/config/AuthContext';
+import { FavoritesProvider } from './src/config/FavoritesContext';
+import { ReviewsProvider } from './src/config/ReviewsContext';
 
 export default function App() {
   return (
     <AuthProvider>
-      <SafeAreaProvider>
-        <StatusBar style="auto" />
-        <AppNavigator />
-      </SafeAreaProvider>
+      <FavoritesProvider>
+        <ReviewsProvider>
+          <SafeAreaProvider>
+            <StatusBar style="auto" />
+            <AppNavigator />
+          </SafeAreaProvider>
+        </ReviewsProvider>
+      </FavoritesProvider>
     </AuthProvider>
   );
 }

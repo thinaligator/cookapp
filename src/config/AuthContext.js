@@ -68,10 +68,27 @@ export const AuthProvider = ({ children }) => {
     return () => unsubscribe();
   }, []);
 
+  // Funkcja do wylogowywania użytkownika
+  const logout = async () => {
+    try {
+      // Wylogowanie z Firebase Auth
+      await auth.signOut();
+      // Czyszczenie lokalnego stanu i AsyncStorage
+      setCurrentUser(null);
+      await AsyncStorage.removeItem('user');
+      console.log("Wylogowano pomyślnie z kontekstu AuthContext");
+      return { success: true };
+    } catch (error) {
+      console.error("Błąd podczas wylogowywania:", error);
+      return { success: false, error: error.message };
+    }
+  };
+
   // Wartości udostępniane przez kontekst
   const value = {
     currentUser,
     loading,
+    logout, // Dodajemy funkcję wylogowania do kontekstu
   };
 
   return (

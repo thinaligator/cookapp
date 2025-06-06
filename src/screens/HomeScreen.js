@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -12,9 +12,10 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import RecipeCard from '../components/RecipeCard';
 import { getRecipes, searchRecipesByTitle } from '../services/recipeService';
-import { auth } from '../config/firebase';
 import { COLORS } from '../config/colors';
 import { useAuth } from '../config/AuthContext';
+import { useFavorites } from '../config/FavoritesContext';
+import { useReviews } from '../config/ReviewsContext';
 
 const HomeScreen = ({ navigation }) => {
   const [recipes, setRecipes] = useState([]);
@@ -22,8 +23,11 @@ const HomeScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchActive, setSearchActive] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState(null);
   
-  const { currentUser } = useAuth();
+  const { currentUser, logout } = useAuth();
+  const { favoriteRecipes, loading: favoritesLoading } = useFavorites();
+  const { registerRefreshListener, lastRatingChange } = useReviews();
 
   // Przykładowe dane do wyświetlenia przed integracją z Firebase
   const sampleRecipes = [
@@ -61,23 +65,27 @@ const HomeScreen = ({ navigation }) => {
     },
   ];
 
-  useEffect(() => {
-    fetchRecipes();
-  }, []);
-
   // Pobieranie przepisów z bazy danych
-  const fetchRecipes = async () => {
+  const fetchRecipes = useCallback(async () => {
     try {
       setLoading(true);
       const recipeData = await getRecipes();
       
       // Jeśli nie ma danych z Firebase, używamy przykładowych danych
-      if (recipeData && recipeData.length > 0) {
-        setRecipes(recipeData);
-        setFilteredRecipes(recipeData);
+      const recipesToUse = recipeData && recipeData.length > 0 ? recipeData : sampleRecipes;
+      
+      setRecipes(recipesToUse);
+      
+      // Jeśli mamy aktywne wyszukiwanie lub kategorię, aktualizujemy również filtrowane przepisy
+      if (selectedCategory) {
+        handleCategoryPress(selectedCategory, recipesToUse);
+      } else if (searchActive && searchQuery) {
+        const filtered = recipesToUse.filter(recipe => 
+          recipe.title.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+        setFilteredRecipes(filtered);
       } else {
-        setRecipes(sampleRecipes);
-        setFilteredRecipes(sampleRecipes);
+        setFilteredRecipes(recipesToUse);
       }
     } catch (error) {
       console.error("Błąd podczas pobierania przepisów:", error);
@@ -86,13 +94,42 @@ const HomeScreen = ({ navigation }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedCategory, searchActive, searchQuery]);
+
+  // Nasłuchiwanie zmian ocen
+  useEffect(() => {
+    // Funkcja wywoływana po zmianie oceny
+    const handleRatingChange = (recipeId, newRating) => {
+      console.log(`Ocena zmieniona: ${recipeId}, nowa ocena: ${newRating}`);
+      fetchRecipes();
+    };
+    
+    // Rejestrujemy nasłuchiwanie
+    const unregister = registerRefreshListener(handleRatingChange);
+    
+    // Czyszczenie nasłuchiwania przy odmontowaniu komponentu
+    return () => unregister();
+  }, [registerRefreshListener, fetchRecipes]);
+
+  // Początkowe pobieranie przepisów
+  useEffect(() => {
+    fetchRecipes();
+  }, [fetchRecipes]);
+
+  // Odświeżanie po zmianie oceny
+  useEffect(() => {
+    if (lastRatingChange) {
+      console.log('Wykryto zmianę oceny, odświeżam przepisy...');
+      fetchRecipes();
+    }
+  }, [lastRatingChange, fetchRecipes]);
 
   // Obsługa wyszukiwania
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
       setFilteredRecipes(recipes);
       setSearchActive(false);
+      setSelectedCategory(null);
       return;
     }
 
@@ -101,6 +138,7 @@ const HomeScreen = ({ navigation }) => {
       const results = await searchRecipesByTitle(searchQuery);
       setFilteredRecipes(results);
       setSearchActive(true);
+      setSelectedCategory(null);
     } catch (error) {
       console.error("Błąd podczas wyszukiwania:", error);
       // Wyszukiwanie lokalne jako fallback
@@ -117,35 +155,51 @@ const HomeScreen = ({ navigation }) => {
     setSearchQuery('');
     setFilteredRecipes(recipes);
     setSearchActive(false);
+    setSelectedCategory(null);
   };
 
   const handleRecipePress = (recipeId) => {
     navigation.navigate('RecipeDetail', { recipeId });
   };
 
-  const handleCategoryPress = (category) => {
-    // W przyszłości przekierujemy do listy przepisów z wybranej kategorii
-    console.log(`Wybrano kategorię: ${category}`);
-    const filtered = recipes.filter(recipe => recipe.category === category);
-    setFilteredRecipes(filtered);
+  const handleCategoryPress = (category, recipesList = recipes) => {
+    setSelectedCategory(category);
+    
+    // Filtrujemy przepisy z wybranej kategorii
+    const categoryRecipes = recipesList.filter(recipe => recipe.category === category);
+    
+    // Pobieramy ulubione przepisy z tej kategorii
+    const categoryFavorites = favoriteRecipes.filter(recipe => recipe.category === category);
+    
+    // Tworzymy nową listę, która najpierw zawiera ulubione z kategorii, a następnie pozostałe
+    const filteredIds = categoryFavorites.map(recipe => recipe.id);
+    const nonFavorites = categoryRecipes.filter(recipe => !filteredIds.includes(recipe.id));
+    
+    // Łączymy obie listy
+    const combined = [...categoryFavorites, ...nonFavorites];
+    setFilteredRecipes(combined);
+    
     setSearchActive(true);
   };
 
-  // Wylogowanie bezpośrednio przez Firebase
+  // Wylogowanie używając funkcji z kontekstu uwierzytelniania
   const handleLogout = async () => {
     try {
-      console.log("Rozpoczynam wylogowywanie...");
-      // Użyj bezpośrednio metody Firebase zamiast funkcji z serwisu
-      await auth.signOut();
-      console.log("Wylogowanie zakończone");
+      console.log("Rozpoczynam wylogowywanie poprzez kontekst uwierzytelniania...");
       
-      // Pokaż alert dla potwierdzenia
-      Alert.alert(
-        "Wylogowano",
-        "Zostałeś pomyślnie wylogowany"
-      );
+      const result = await logout();
+      
+      if (result.success) {
+        console.log("Wylogowanie zakończone pomyślnie");
+      } else {
+        console.error("Błąd podczas wylogowywania:", result.error);
+        Alert.alert(
+          "Błąd wylogowania",
+          "Nie udało się wylogować: " + result.error
+        );
+      }
     } catch (error) {
-      console.error("Błąd podczas wylogowywania:", error);
+      console.error("Nieoczekiwany błąd podczas wylogowywania:", error);
       Alert.alert(
         "Błąd wylogowania",
         "Nie udało się wylogować: " + error.message
@@ -194,83 +248,125 @@ const HomeScreen = ({ navigation }) => {
           </View>
         ) : (
           <>
-            {searchActive && (
-              <View style={styles.resultsHeader}>
-                <Text style={styles.resultsText}>
-                  Znaleziono {filteredRecipes.length} przepisów
-                </Text>
-                <TouchableOpacity onPress={clearSearch}>
-                  <Text style={styles.clearText}>Wyczyść filtry</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>
-                {searchActive ? 'Wyniki wyszukiwania' : 'Wszystkie przepisy'}
-              </Text>
-              
-              {filteredRecipes.length > 0 ? (
-                <View style={styles.recipeList}>
-                  {filteredRecipes.map((recipe) => (
-                    <RecipeCard 
-                      key={recipe.id}
-                      recipe={recipe}
-                      onPress={() => handleRecipePress(recipe.id)}
-                    />
-                  ))}
-                </View>
-              ) : (
-                <View style={styles.noRecipes}>
-                  <Text style={styles.noRecipesText}>
-                    Nie znaleziono przepisów odpowiadających kryteriom.
+            {searchActive ? (
+              <>
+                <View style={styles.resultsHeader}>
+                  <TouchableOpacity onPress={clearSearch} style={styles.backButton}>
+                    <Text style={styles.backButtonText}>← Wróć</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.resultsText}>
+                    {selectedCategory 
+                      ? `Kategoria: ${selectedCategory}` 
+                      : `Znaleziono ${filteredRecipes.length} przepisów`}
                   </Text>
-                </View>
-              )}
-            </View>
-            
-            {!searchActive && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Kategorie</Text>
-                <View style={styles.categoryList}>
-                  <TouchableOpacity 
-                    style={styles.categoryItem}
-                    onPress={() => handleCategoryPress('Desery')}
-                  >
-                    <Text style={styles.categoryText}>Desery</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.categoryItem}
-                    onPress={() => handleCategoryPress('Dania główne')}
-                  >
-                    <Text style={styles.categoryText}>Dania główne</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.categoryItem}
-                    onPress={() => handleCategoryPress('Zupy')}
-                  >
-                    <Text style={styles.categoryText}>Zupy</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.categoryItem}
-                    onPress={() => handleCategoryPress('Sałatki')}
-                  >
-                    <Text style={styles.categoryText}>Sałatki</Text>
+                  <TouchableOpacity onPress={clearSearch}>
+                    <Text style={styles.clearText}>Wyczyść filtry</Text>
                   </TouchableOpacity>
                 </View>
-              </View>
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>
+                    {searchQuery 
+                      ? 'Wyniki wyszukiwania' 
+                      : selectedCategory 
+                        ? `Przepisy z kategorii: ${selectedCategory}` 
+                        : 'Wyniki kategorii'}
+                  </Text>
+                  
+                  {filteredRecipes.length > 0 ? (
+                    <View style={styles.recipeList}>
+                      {filteredRecipes.map((recipe) => (
+                        <RecipeCard 
+                          key={recipe.id}
+                          recipe={recipe}
+                          onPress={() => handleRecipePress(recipe.id)}
+                        />
+                      ))}
+                    </View>
+                  ) : (
+                    <View style={styles.noRecipes}>
+                      <Text style={styles.noRecipesText}>
+                        Nie znaleziono przepisów odpowiadających kryteriom.
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </>
+            ) : (
+              <>
+                {/* Kategorie - teraz zawsze na górze */}
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Kategorie</Text>
+                  <View style={styles.categoryList}>
+                    <TouchableOpacity 
+                      style={styles.categoryItem}
+                      onPress={() => handleCategoryPress('Desery')}
+                    >
+                      <Text style={styles.categoryText}>Desery</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.categoryItem}
+                      onPress={() => handleCategoryPress('Dania główne')}
+                    >
+                      <Text style={styles.categoryText}>Dania główne</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.categoryItem}
+                      onPress={() => handleCategoryPress('Zupy')}
+                    >
+                      <Text style={styles.categoryText}>Zupy</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.categoryItem}
+                      onPress={() => handleCategoryPress('Sałatki')}
+                    >
+                      <Text style={styles.categoryText}>Sałatki</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                
+                {/* Ulubione przepisy - pomiędzy kategoriami a wszystkimi przepisami */}
+                {currentUser && favoriteRecipes.length > 0 && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Twoje ulubione przepisy</Text>
+                    <View style={styles.recipeList}>
+                      {favoriteRecipes.map((recipe) => (
+                        <RecipeCard 
+                          key={recipe.id}
+                          recipe={recipe}
+                          onPress={() => handleRecipePress(recipe.id)}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                )}
+                
+                {/* Wszystkie przepisy - teraz poniżej kategorii i ulubionych */}
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Wszystkie przepisy</Text>
+                  
+                  {recipes.length > 0 ? (
+                    <View style={styles.recipeList}>
+                      {recipes.map((recipe) => (
+                        <RecipeCard 
+                          key={recipe.id}
+                          recipe={recipe}
+                          onPress={() => handleRecipePress(recipe.id)}
+                        />
+                      ))}
+                    </View>
+                  ) : (
+                    <View style={styles.noRecipes}>
+                      <Text style={styles.noRecipesText}>
+                        Brak przepisów do wyświetlenia.
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </>
             )}
           </>
         )}
-
-        <View style={styles.testButtonContainer}>
-          <TouchableOpacity 
-            style={styles.testButton}
-            onPress={() => navigation.navigate('TestDatabase')}
-          >
-            <Text style={styles.testButtonText}>Test bazy danych</Text>
-          </TouchableOpacity>
-        </View>
       </ScrollView>
     </View>
   );
@@ -410,20 +506,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
-  testButtonContainer: {
-    padding: 15,
-    marginBottom: 20,
+  backButton: {
+    padding: 10,
   },
-  testButton: {
-    backgroundColor: COLORS.primary,
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  testButtonText: {
-    color: COLORS.white,
+  backButtonText: {
+    color: COLORS.primary,
     fontWeight: 'bold',
-  }
+  },
 });
 
 export default HomeScreen; 

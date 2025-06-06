@@ -5,7 +5,6 @@ import { createStackNavigator } from '@react-navigation/stack';
 // Importujemy ekrany
 import HomeScreen from '../screens/HomeScreen';
 import RecipeDetailScreen from '../screens/RecipeDetailScreen';
-import TestDatabaseScreen from '../screens/TestDatabaseScreen';
 import AuthScreen from '../screens/AuthScreen';
 
 // Importujemy kontekst uwierzytelniania
@@ -25,7 +24,6 @@ const AuthenticatedStack = () => {
     >
       <Stack.Screen name="Home" component={HomeScreen} />
       <Stack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
-      <Stack.Screen name="TestDatabase" component={TestDatabaseScreen} />
     </Stack.Navigator>
   );
 };

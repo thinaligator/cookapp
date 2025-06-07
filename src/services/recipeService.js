@@ -18,16 +18,21 @@ import {
 const RECIPES_COLLECTION = 'recipes';
 
 // Pobieranie wszystkich przepisów - uproszczone zapytanie bez sortowania
-export const getRecipes = async (limitCount = 20) => {
+export const getRecipes = async (limitCount = 20, dietaryPreferences = []) => {
   try {
     // Uproszczone zapytanie bez filtrowania i sortowania
     const recipesCollection = collection(db, RECIPES_COLLECTION);
     const recipesSnapshot = await getDocs(recipesCollection);
     
-    const recipes = recipesSnapshot.docs.map(doc => ({
+    let recipes = recipesSnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     }));
+    
+    // Filtrujemy przepisy na podstawie preferencji żywieniowych użytkownika
+    if (dietaryPreferences && dietaryPreferences.length > 0) {
+      recipes = filterRecipesByDietaryPreferences(recipes, dietaryPreferences);
+    }
     
     // Sortujemy przepisy według oceny (od najwyższej do najniższej)
     // Przepisy bez oceny (avgRating undefined lub 0) będą na końcu
@@ -351,4 +356,132 @@ export const getRecipesByTag = async (tag) => {
     console.error('Błąd podczas filtrowania przepisów po tagu:', error);
     return [];
   }
+};
+
+// Filtrowanie przepisów na podstawie preferencji żywieniowych
+export const filterRecipesByDietaryPreferences = (recipes, dietaryPreferences) => {
+  if (!dietaryPreferences || dietaryPreferences.length === 0) {
+    console.log("Brak preferencji żywieniowych do filtrowania");
+    return recipes;
+  }
+  
+  console.log(`Filtrowanie ${recipes.length} przepisów według preferencji: ${dietaryPreferences.join(', ')}`);
+  
+  // Przygotuj preferencje do prostszego dopasowania
+  const cleanedPreferences = dietaryPreferences.map(pref => 
+    pref.toLowerCase().trim()
+  );
+  
+  console.log("Przygotowane preferencje do dopasowania:", JSON.stringify(cleanedPreferences));
+  
+  // Normalizuj tekst do sprawdzania dopasowań (usuń spacje, przyimki, itp.)
+  const normalizeText = (text) => {
+    let normalized = text.toLowerCase().trim();
+    
+    // Usuń przyimki
+    normalized = normalized.replace(/\s+z\s+/g, ' ');
+    normalized = normalized.replace(/\s+w\s+/g, ' ');
+    normalized = normalized.replace(/\s+na\s+/g, ' ');
+    normalized = normalized.replace(/\s+ze\s+/g, ' ');
+    normalized = normalized.replace(/\s+do\s+/g, ' ');
+    
+    // Normalizuj spacje
+    normalized = normalized.replace(/\s+/g, ' ');
+    
+    return normalized;
+  };
+  
+  // Funkcja pomocnicza do sprawdzania dopasowań
+  const containsUnwantedIngredient = (ingredientText, preferences) => {
+    if (!ingredientText) return false;
+    
+    const normalizedIngredient = normalizeText(ingredientText);
+    
+    // Szczegółowe logowanie dla debugowania
+    console.log(`Sprawdzanie składnika: "${ingredientText}" (znormalizowany: "${normalizedIngredient}")`);
+    
+    // Sprawdź każdą preferencję
+    for (const pref of preferences) {
+      const normalizedPref = normalizeText(pref);
+      
+      // Metoda 1: Bezpośrednie zawieranie preferencji w składniku
+      if (normalizedIngredient.includes(normalizedPref)) {
+        console.log(`DOPASOWANO: Składnik "${ingredientText}" zawiera niechciany składnik "${pref}"`);
+        return true;
+      }
+      
+      // Metoda 2: Pełne dopasowanie (dokładnie ten sam składnik)
+      if (normalizedIngredient === normalizedPref) {
+        console.log(`DOPASOWANO DOKŁADNIE: Składnik "${ingredientText}" to dokładnie niechciany składnik "${pref}"`);
+        return true;
+      }
+      
+      // Metoda 3: Dopasowanie początku słowa (dla podstawowych form składników)
+      // Np. "cebula" powinno dopasować "cebulę", "cebuli", "cebulka", itp.
+      const ingredientWords = normalizedIngredient.split(' ');
+      for (const word of ingredientWords) {
+        if (word.startsWith(normalizedPref) || normalizedPref.startsWith(word)) {
+          if (word.length >= 3 && normalizedPref.length >= 3) { // Unikaj krótkich słów
+            console.log(`DOPASOWANO CZĘŚĆ SŁOWA: Składnik "${ingredientText}" zawiera słowo "${word}" dopasowane do "${pref}"`);
+            return true;
+          }
+        }
+      }
+      
+      // Specjalne sprawdzenie dla "kurczaka" i podobnych
+      if ((pref.includes("kurczak") || pref.includes("kur")) && 
+          (normalizedIngredient.includes("kurcz") || 
+           normalizedIngredient.includes("kurz") || 
+           normalizedIngredient.includes("drób") || 
+           normalizedIngredient.includes("drob"))) {
+        console.log(`DOPASOWANO SPECJALNE: Składnik "${ingredientText}" to rodzaj kurczaka - pasuje do "${pref}"`);
+        return true;
+      }
+      
+      // Sprawdź czy "cebula" pasuje do różnych form
+      if ((pref.includes("cebul") && normalizedIngredient.includes("cebul")) ||
+          (pref === "cebula" && (normalizedIngredient.includes("cebul") || 
+                               normalizedIngredient.includes("cebulow")))) {
+        console.log(`DOPASOWANO CEBULĘ: Składnik "${ingredientText}" zawiera cebulę - pasuje do "${pref}"`);
+        return true;
+      }
+    }
+    
+    return false;
+  };
+  
+  const filteredRecipes = recipes.filter(recipe => {
+    // Jeśli przepis nie ma składników, nie możemy go filtrować
+    if (!recipe.ingredients || !Array.isArray(recipe.ingredients) || recipe.ingredients.length === 0) {
+      console.log(`Przepis ${recipe.title} nie ma składników lub nie są tablicą`);
+      return true; // Zwracamy true, bo nie możemy stwierdzić, że zawiera niechciane składniki
+    }
+    
+    // Sprawdź czy nazwa przepisu zawiera niechciany składnik
+    for (const pref of cleanedPreferences) {
+      if (normalizeText(recipe.title).includes(normalizeText(pref))) {
+        console.log(`Przepis "${recipe.title}" zawiera niechciany składnik "${pref}" w tytule - odfiltrowany`);
+        return false;
+      }
+    }
+    
+    // Sprawdzamy każdy składnik przepisu
+    for (const ingredient of recipe.ingredients) {
+      // Konwertujemy składnik na string jeśli to obiekt
+      const ingredientText = typeof ingredient === 'object' ? 
+        (ingredient.name || JSON.stringify(ingredient)) : String(ingredient);
+      
+      // Sprawdź czy składnik zawiera niechciany element
+      if (containsUnwantedIngredient(ingredientText, cleanedPreferences)) {
+        console.log(`Przepis ${recipe.title} zawiera niechciany składnik "${ingredientText}" - odfiltrowany`);
+        return false;
+      }
+    }
+    
+    console.log(`Przepis ${recipe.title} przeszedł filtrację - nie zawiera niechcianych składników`);
+    return true; // Przepis nie zawiera żadnych niechcianych składników
+  });
+  
+  console.log(`Po filtrowaniu zostało ${filteredRecipes.length} przepisów z ${recipes.length}`);
+  return filteredRecipes;
 }; 

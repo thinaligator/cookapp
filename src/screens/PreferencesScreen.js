@@ -4,73 +4,110 @@ import {
   Text, 
   StyleSheet, 
   TouchableOpacity, 
-  Switch, 
   ScrollView,
-  Alert
+  Alert,
+  TextInput,
+  FlatList
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../config/colors';
 import { useAuth } from '../config/AuthContext';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getUserDietaryPreferences, updateDietaryPreferences } from '../services/userService';
 
 const PreferencesScreen = ({ navigation }) => {
   const { currentUser } = useAuth();
-  
-  // Preferencje użytkownika
-  const [darkMode, setDarkMode] = useState(false);
-  const [sortByRating, setSortByRating] = useState(true);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [showRecommendations, setShowRecommendations] = useState(true);
+  const [dietaryPreferences, setDietaryPreferences] = useState([]);
+  const [newIngredient, setNewIngredient] = useState('');
+  const [loading, setLoading] = useState(false);
   
   // Ładowanie preferencji przy montowaniu komponentu
   useEffect(() => {
-    const loadPreferences = async () => {
-      try {
-        const savedPreferences = await AsyncStorage.getItem('userPreferences');
-        if (savedPreferences) {
-          const preferences = JSON.parse(savedPreferences);
-          setDarkMode(preferences.darkMode || false);
-          setSortByRating(preferences.sortByRating || true);
-          setNotificationsEnabled(preferences.notificationsEnabled || true);
-          setShowRecommendations(preferences.showRecommendations || true);
-        }
-      } catch (error) {
-        console.error('Błąd podczas ładowania preferencji:', error);
-      }
-    };
-    
-    loadPreferences();
+    loadDietaryPreferences();
   }, []);
+  
+  // Funkcja ładująca preferencje żywieniowe
+  const loadDietaryPreferences = async () => {
+    if (!currentUser) return;
+    
+    try {
+      setLoading(true);
+      const preferences = await getUserDietaryPreferences(currentUser.uid);
+      setDietaryPreferences(preferences || []);
+    } catch (error) {
+      console.error('Błąd podczas ładowania preferencji żywieniowych:', error);
+      Alert.alert('Błąd', 'Nie udało się załadować preferencji żywieniowych');
+    } finally {
+      setLoading(false);
+    }
+  };
   
   // Zapisywanie preferencji po zmianie
   const savePreferences = async () => {
+    if (!currentUser) {
+      Alert.alert('Błąd', 'Musisz być zalogowany, aby zapisać preferencje');
+      return;
+    }
+    
     try {
-      const preferences = {
-        darkMode,
-        sortByRating,
-        notificationsEnabled,
-        showRecommendations
-      };
+      setLoading(true);
+      await updateDietaryPreferences(currentUser.uid, dietaryPreferences);
       
-      await AsyncStorage.setItem('userPreferences', JSON.stringify(preferences));
-      Alert.alert('Sukces', 'Preferencje zostały zapisane');
+      // Krótki alert informujący o zapisaniu preferencji
+      Alert.alert(
+        'Sukces', 
+        'Preferencje żywieniowe zostały zapisane. Przepisy zostaną odfiltrowane.',
+        [
+          { 
+            text: 'OK', 
+            onPress: () => {
+              // Resetujemy nawigację do ekranu głównego, co wymusi jego pełne przeładowanie
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Home' }],
+              });
+            }
+          }
+        ],
+        { cancelable: false }
+      );
     } catch (error) {
       console.error('Błąd podczas zapisywania preferencji:', error);
       Alert.alert('Błąd', 'Nie udało się zapisać preferencji');
+      setLoading(false);
     }
+  };
+  
+  // Dodawanie nowego składnika do preferencji
+  const addIngredient = () => {
+    if (!newIngredient.trim()) {
+      Alert.alert('Błąd', 'Proszę wprowadzić nazwę składnika');
+      return;
+    }
+    
+    // Sprawdzamy, czy składnik już istnieje
+    const ingredient = newIngredient.trim().toLowerCase();
+    if (dietaryPreferences.some(item => item.toLowerCase() === ingredient)) {
+      Alert.alert('Informacja', 'Ten składnik już znajduje się na liście');
+      return;
+    }
+    
+    setDietaryPreferences([...dietaryPreferences, ingredient]);
+    setNewIngredient('');
+  };
+  
+  // Usuwanie składnika z preferencji
+  const removeIngredient = (index) => {
+    const newPreferences = [...dietaryPreferences];
+    newPreferences.splice(index, 1);
+    setDietaryPreferences(newPreferences);
   };
 
   return (
     <View style={styles.container}>
       {/* Nagłówek */}
       <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton} 
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Preferencje</Text>
+        <View style={styles.placeholder} />
+        <Text style={styles.title}>Preferencje żywieniowe</Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -84,77 +121,62 @@ const PreferencesScreen = ({ navigation }) => {
           <Text style={styles.userEmail}>{currentUser?.email || ''}</Text>
         </View>
         
-        {/* Preferencje */}
+        {/* Preferencje żywieniowe */}
         <View style={styles.preferencesSection}>
-          <Text style={styles.sectionTitle}>Ustawienia aplikacji</Text>
+          <Text style={styles.sectionTitle}>Składniki, których nie lubisz</Text>
+          <Text style={styles.sectionDescription}>
+            Dodaj produkty, których nie chcesz widzieć w przepisach. Przepisy zawierające te składniki 
+            będą ukryte na liście przepisów.
+          </Text>
           
-          <View style={styles.preferenceItem}>
-            <View style={styles.preferenceTextContainer}>
-              <Text style={styles.preferenceTitle}>Tryb ciemny</Text>
-              <Text style={styles.preferenceDescription}>
-                Zmień motyw aplikacji na ciemny
-              </Text>
-            </View>
-            <Switch
-              value={darkMode}
-              onValueChange={setDarkMode}
-              trackColor={{ false: COLORS.lightGrey, true: COLORS.primary }}
-              thumbColor={COLORS.white}
+          {/* Dodawanie nowego składnika */}
+          <View style={styles.addIngredientContainer}>
+            <TextInput 
+              style={styles.input}
+              placeholder="Wpisz nazwę składnika..."
+              value={newIngredient}
+              onChangeText={setNewIngredient}
+              onSubmitEditing={addIngredient}
             />
+            <TouchableOpacity 
+              style={styles.addButton}
+              onPress={addIngredient}
+            >
+              <Ionicons name="add" size={24} color={COLORS.white} />
+            </TouchableOpacity>
           </View>
           
-          <View style={styles.preferenceItem}>
-            <View style={styles.preferenceTextContainer}>
-              <Text style={styles.preferenceTitle}>Sortuj według ocen</Text>
-              <Text style={styles.preferenceDescription}>
-                Pokaż najpierw najwyżej oceniane przepisy
-              </Text>
+          {/* Lista składników */}
+          {dietaryPreferences.length > 0 ? (
+            <View style={styles.ingredientsList}>
+              {dietaryPreferences.map((item, index) => (
+                <View key={index} style={styles.ingredientItem}>
+                  <Text style={styles.ingredientText}>{item}</Text>
+                  <TouchableOpacity 
+                    style={styles.removeButton}
+                    onPress={() => removeIngredient(index)}
+                  >
+                    <Ionicons name="close" size={22} color={COLORS.white} />
+                  </TouchableOpacity>
+                </View>
+              ))}
             </View>
-            <Switch
-              value={sortByRating}
-              onValueChange={setSortByRating}
-              trackColor={{ false: COLORS.lightGrey, true: COLORS.primary }}
-              thumbColor={COLORS.white}
-            />
-          </View>
-          
-          <View style={styles.preferenceItem}>
-            <View style={styles.preferenceTextContainer}>
-              <Text style={styles.preferenceTitle}>Powiadomienia</Text>
-              <Text style={styles.preferenceDescription}>
-                Otrzymuj powiadomienia o nowych przepisach
-              </Text>
-            </View>
-            <Switch
-              value={notificationsEnabled}
-              onValueChange={setNotificationsEnabled}
-              trackColor={{ false: COLORS.lightGrey, true: COLORS.primary }}
-              thumbColor={COLORS.white}
-            />
-          </View>
-          
-          <View style={styles.preferenceItem}>
-            <View style={styles.preferenceTextContainer}>
-              <Text style={styles.preferenceTitle}>Rekomendacje</Text>
-              <Text style={styles.preferenceDescription}>
-                Pokaż rekomendowane przepisy na podstawie twoich upodobań
-              </Text>
-            </View>
-            <Switch
-              value={showRecommendations}
-              onValueChange={setShowRecommendations}
-              trackColor={{ false: COLORS.lightGrey, true: COLORS.primary }}
-              thumbColor={COLORS.white}
-            />
-          </View>
+          ) : (
+            <Text style={styles.emptyListText}>
+              Brak składników na liście. Dodaj składniki, których nie lubisz.
+            </Text>
+          )}
         </View>
         
         {/* Przycisk zapisywania */}
         <TouchableOpacity 
           style={styles.saveButton} 
           onPress={savePreferences}
+          disabled={loading}
         >
-          <Text style={styles.saveButtonText}>Zapisz preferencje</Text>
+          <Text style={styles.saveButtonText}>
+            {loading ? 'Zapisywanie...' : 'Zapisz i wróć'}
+          </Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -177,17 +199,13 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.lightGrey,
     paddingTop: 50,
   },
-  backButton: {
-    padding: 10,
-    marginBottom: 5,
+  placeholder: {
+    width: 34,
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
     color: COLORS.primary,
-  },
-  placeholder: {
-    width: 34,
   },
   content: {
     flex: 1,
@@ -223,29 +241,64 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: COLORS.text,
-    marginBottom: 15,
+    marginBottom: 8,
   },
-  preferenceItem: {
+  sectionDescription: {
+    fontSize: 14,
+    color: COLORS.lightText,
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  addIngredientContainer: {
+    flexDirection: 'row',
+    marginBottom: 20,
+  },
+  input: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    padding: 12,
+    borderRadius: 8,
+    marginRight: 10,
+  },
+  addButton: {
+    backgroundColor: COLORS.primary,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ingredientsList: {
+    marginBottom: 10,
+  },
+  ingredientItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightGrey,
+    backgroundColor: COLORS.background,
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 10,
   },
-  preferenceTextContainer: {
-    flex: 1,
-    marginRight: 10,
-  },
-  preferenceTitle: {
+  ingredientText: {
     fontSize: 16,
-    fontWeight: '500',
     color: COLORS.text,
+    flex: 1,
   },
-  preferenceDescription: {
+  removeButton: {
+    backgroundColor: COLORS.error || '#FF6B6B',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyListText: {
     fontSize: 14,
     color: COLORS.lightText,
-    marginTop: 4,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginVertical: 20,
   },
   saveButton: {
     backgroundColor: COLORS.primary,

@@ -12,13 +12,15 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import RecipeCard from '../components/RecipeCard';
-import { getRecipes, searchRecipesByTitle, getRecipesByTag, updateRecipeTags, getRecipesByCategory } from '../services/recipeService';
+import { getRecipes, searchRecipesByTitle, getRecipesByTag, updateRecipeTags, getRecipesByCategory, filterRecipesByDietaryPreferences } from '../services/recipeService';
 import { getImageFromCache } from '../services/imageCacheService';
 import { COLORS } from '../config/colors';
 import { useAuth } from '../config/AuthContext';
 import { useFavorites } from '../config/FavoritesContext';
 import { useReviews } from '../config/ReviewsContext';
 import { Ionicons } from '@expo/vector-icons';
+import { getUserDietaryPreferences } from '../services/userService';
+import { useFocusEffect } from '@react-navigation/native';
 
 // Stałe dla kategorii
 const CATEGORIES = ['Śniadanie', 'Danie główne', 'Zupa', 'Sałatka', 'Kolacja', 'Deser'];
@@ -74,13 +76,16 @@ const CATEGORY_TAG_MAPPING = {
   'Deser': ['słodkie']
 };
 
-const HomeScreen = ({ navigation }) => {
+const HomeScreen = ({ navigation, route }) => {
   const [recipes, setRecipes] = useState([]);
   const [filteredRecipes, setFilteredRecipes] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [dietaryPreferences, setDietaryPreferences] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchActive, setSearchActive] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedTag, setSelectedTag] = useState(null);
   
   const { currentUser, logout } = useAuth();
@@ -123,75 +128,77 @@ const HomeScreen = ({ navigation }) => {
     },
   ];
 
-  // Dodawanie przykładowych tagów do przepisów
-  const addSampleTagsToRecipes = useCallback(async (recipesList) => {
+  // Pobieranie przepisów z Firebase
+  const fetchRecipes = useCallback(async () => {
     try {
-      const recipesNeedingTags = recipesList.filter(recipe => !recipe.tags || !Array.isArray(recipe.tags) || recipe.tags.length === 0);
+      setLoading(true);
       
-      if (recipesNeedingTags.length === 0) {
-        console.log('Wszystkie przepisy mają już tagi');
-        return;
-      }
-      
-      console.log(`Dodawanie tagów do ${recipesNeedingTags.length} przepisów...`);
-      
-      for (const recipe of recipesNeedingTags) {
-        let tags = [];
+      // Pobierz preferencje żywieniowe użytkownika, jeśli jest zalogowany
+      let userDietaryPreferences = [];
+      if (currentUser) {
+        userDietaryPreferences = await getUserDietaryPreferences(currentUser.uid);
+        console.log("Pobrane preferencje żywieniowe dla użytkownika", currentUser.displayName || currentUser.email, ":", JSON.stringify(userDietaryPreferences));
         
-        // Dodaj tagi na podstawie kategorii
-        if (recipe.category && CATEGORY_TAG_MAPPING[recipe.category]) {
-          tags.push(...CATEGORY_TAG_MAPPING[recipe.category]);
-        }
+        // Sprawdź, czy zawierają "pierś z kurczaka" lub podobne
+        const chickenRelated = userDietaryPreferences.filter(pref => 
+          pref.toLowerCase().includes('kurczak') || 
+          pref.toLowerCase().includes('drób') ||
+          pref.toLowerCase().includes('filet')
+        );
         
-        // Dodaj tagi na podstawie tytułu
-        if (recipe.title) {
-          Object.keys(RECIPE_TAG_MAPPING).forEach(keyword => {
-            if (recipe.title.toLowerCase().includes(keyword.toLowerCase())) {
-              tags.push(...RECIPE_TAG_MAPPING[keyword]);
-            }
-          });
-        }
-        
-        // Dodaj domyślne tagi, jeśli nie znaleziono żadnych
-        if (tags.length === 0) {
-          tags.push(AVAILABLE_TAGS[Math.floor(Math.random() * AVAILABLE_TAGS.length)]);
-          tags.push(AVAILABLE_TAGS[Math.floor(Math.random() * AVAILABLE_TAGS.length)]);
-        }
-        
-        // Usuń kategorie z tagów
-        tags = removeCategoriesFromTags(tags);
-        
-        // Usuń duplikaty i ogranicz do 3 tagów
-        const uniqueTags = [...new Set(tags)].slice(0, 3);
-        
-        // Dodaj losowy tag, jeśli po usunięciu kategorii nic nie zostało
-        if (uniqueTags.length === 0) {
-          uniqueTags.push(AVAILABLE_TAGS[Math.floor(Math.random() * AVAILABLE_TAGS.length)]);
-        }
-        
-        console.log(`Dodawanie tagów do przepisu "${recipe.title}": ${uniqueTags.join(', ')}`);
-        
-        // Aktualizuj przepis z tagami
-        const success = await updateRecipeTags(recipe.id, uniqueTags);
-        if (success) {
-          console.log(`Pomyślnie dodano tagi do przepisu "${recipe.title}"`);
+        if (chickenRelated.length > 0) {
+          console.log("Znaleziono preferencje związane z kurczakiem:", chickenRelated);
         } else {
-          console.error(`Nie udało się dodać tagów do przepisu "${recipe.title}"`);
+          console.log("Nie znaleziono preferencji związanych z kurczakiem");
+        }
+        
+        setDietaryPreferences(userDietaryPreferences);
+      }
+      
+      // Jeśli wybrano kategorię, pobierz przepisy z tej kategorii
+      let fetchedRecipes;
+      if (selectedCategory) {
+        const categoryRecipes = await getRecipesByCategory(selectedCategory);
+        console.log(`Znaleziono ${categoryRecipes.length} przepisów w kategorii ${selectedCategory}`);
+        
+        // Filtrujemy lokalnie zgodnie z preferencjami
+        if (userDietaryPreferences && userDietaryPreferences.length > 0) {
+          console.log(`Filtrowanie ${categoryRecipes.length} przepisów według preferencji: ${userDietaryPreferences.join(', ')}`);
+          
+          // Używamy zaimplementowanej funkcji zamiast filtrowania ręcznie
+          fetchedRecipes = filterRecipesByDietaryPreferences(categoryRecipes, userDietaryPreferences);
+        } else {
+          fetchedRecipes = categoryRecipes;
+        }
+      } else {
+        // Pobierz wszystkie przepisy i użyj ulepszonego filtrowania
+        console.log("Pobieranie wszystkich przepisów z uwzględnieniem preferencji");
+        const allRecipes = await getRecipes(50);
+        
+        // Filtrujemy z użyciem ulepszonego algorytmu
+        if (userDietaryPreferences && userDietaryPreferences.length > 0) {
+          fetchedRecipes = filterRecipesByDietaryPreferences(allRecipes, userDietaryPreferences);
+        } else {
+          fetchedRecipes = allRecipes;
         }
       }
       
-      console.log('Zakończono dodawanie tagów do przepisów');
+      // Ustaw pobrane przepisy
+      setRecipes(fetchedRecipes);
+      setFilteredRecipes(fetchedRecipes);
       
-      // Ponownie pobierz przepisy, aby zobaczyć zaktualizowane tagi
-      console.log('Odświeżanie listy przepisów...');
-      const updatedRecipes = await getRecipes();
-      setRecipes(updatedRecipes);
-      setFilteredRecipes(updatedRecipes);
+      // Zbierz unikalne kategorie
+      const uniqueCategories = Array.from(
+        new Set(fetchedRecipes.map(recipe => recipe.category).filter(Boolean))
+      );
+      setCategories(uniqueCategories);
       
+      setLoading(false);
     } catch (error) {
-      console.error('Błąd podczas dodawania przykładowych tagów:', error);
+      console.error('Błąd podczas pobierania przepisów:', error);
+      setLoading(false);
     }
-  }, []);
+  }, [currentUser, selectedCategory]);
 
   // Sortowanie przepisów według ocen (od najwyższej do najniższej)
   const sortRecipesByRating = useCallback((recipesToSort) => {
@@ -202,50 +209,6 @@ const HomeScreen = ({ navigation }) => {
       return bRating - aRating;
     });
   }, []);
-
-  // Pobieranie przepisów z bazy danych
-  const fetchRecipes = useCallback(async () => {
-      setLoading(true);
-    try {
-      console.log('Pobieranie przepisów...');
-      let recipesData = await getRecipes();
-      
-      // Upewnij się, że każdy przepis ma poprawny format tagów (tablica)
-      recipesData = recipesData.map(recipe => {
-        if (!recipe.tags || !Array.isArray(recipe.tags)) {
-          console.log(`Naprawianie formatu tagów dla przepisu "${recipe.title}"`);
-          return { ...recipe, tags: [] };
-        }
-        return recipe;
-      });
-      
-      console.log(`Pobrano ${recipesData.length} przepisów`);
-      
-      // Jeśli nie ma przepisów z tagami, dodaj przykładowe tagi
-      const hasAnyTags = recipesData.some(recipe => 
-        recipe.tags && Array.isArray(recipe.tags) && recipe.tags.length > 0
-      );
-      
-      if (!hasAnyTags && recipesData.length > 0) {
-        console.log('Żaden przepis nie ma tagów, dodawanie przykładowych tagów...');
-        await addSampleTagsToRecipes(recipesData);
-      } else {
-        console.log('Niektóre przepisy już mają tagi');
-      }
-      
-      // Posortuj przepisy według ocen (od najwyższej do najniższej)
-      const sortedRecipes = sortRecipesByRating(recipesData);
-      
-      setRecipes(sortedRecipes);
-      setFilteredRecipes(sortedRecipes);
-      
-    } catch (error) {
-      console.error('Błąd podczas pobierania przepisów:', error);
-      Alert.alert('Błąd', 'Wystąpił problem podczas ładowania przepisów.');
-    } finally {
-      setLoading(false);
-    }
-  }, [addSampleTagsToRecipes, sortRecipesByRating]);
 
   // Nasłuchiwanie zmian ocen
   useEffect(() => {
@@ -507,10 +470,10 @@ const HomeScreen = ({ navigation }) => {
         console.log("Wylogowanie zakończone pomyślnie");
       } else {
         console.error("Błąd podczas wylogowywania:", result.error);
-      Alert.alert(
+        Alert.alert(
           "Błąd wylogowania",
           "Nie udało się wylogować: " + result.error
-      );
+        );
       }
     } catch (error) {
       console.error("Nieoczekiwany błąd podczas wylogowywania:", error);
@@ -578,6 +541,14 @@ const HomeScreen = ({ navigation }) => {
     }
   }, [recipes]);
 
+  // Odświeżanie przepisów za każdym razem gdy ekran jest w fokusie
+  useFocusEffect(
+    useCallback(() => {
+      console.log('HomeScreen uzyskał fokus - odświeżam przepisy...');
+      fetchRecipes();
+    }, [fetchRecipes])
+  );
+
   return (
     <View style={styles.container}>
       <StatusBar style="auto" />
@@ -585,7 +556,7 @@ const HomeScreen = ({ navigation }) => {
       {/* Nagłówek */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-            <Text style={styles.logoutText}>Wyloguj</Text>
+          <Text style={styles.logoutText}>Wyloguj</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Kucharz</Text>
         <TouchableOpacity onPress={toggleMenu} style={styles.menuButton}>
@@ -607,31 +578,43 @@ const HomeScreen = ({ navigation }) => {
               </TouchableOpacity>
             </View>
             
+            {/* Ulubione przepisy */}
             <TouchableOpacity 
-              style={styles.menuItem} 
-              onPress={() => navigateToScreen('Preferences')}
-            >
-              <Ionicons name="settings-outline" size={24} color={COLORS.primary} />
-              <Text style={styles.menuItemText}>Zmień preferencje</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.menuItem} 
+              style={styles.menuItem}
               onPress={() => navigateToScreen('Favorites')}
             >
               <Ionicons name="heart-outline" size={24} color={COLORS.primary} />
               <Text style={styles.menuItemText}>Ulubione przepisy</Text>
             </TouchableOpacity>
-            
+
+            {/* Dodaj przepis */}
             <TouchableOpacity 
-              style={styles.menuItem} 
+              style={styles.menuItem}
               onPress={() => navigateToScreen('AddRecipe')}
             >
               <Ionicons name="add-circle-outline" size={24} color={COLORS.primary} />
               <Text style={styles.menuItemText}>Dodaj przepis</Text>
-          </TouchableOpacity>
+            </TouchableOpacity>
+            
+            {/* Historia gotowania */}
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={() => navigateToScreen('CookingHistory')}
+            >
+              <Ionicons name="time-outline" size={24} color={COLORS.primary} />
+              <Text style={styles.menuItemText}>Historia gotowania</Text>
+            </TouchableOpacity>
+
+            {/* Zmień preferencje */}
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={() => navigateToScreen('Preferences')}
+            >
+              <Ionicons name="settings-outline" size={24} color={COLORS.primary} />
+              <Text style={styles.menuItemText}>Zmień preferencje</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
       )}
       
       <View style={styles.searchContainer}>

@@ -9,6 +9,8 @@ import AuthScreen from '../screens/AuthScreen';
 import FavoritesScreen from '../screens/FavoritesScreen';
 import PreferencesScreen from '../screens/PreferencesScreen';
 import AddRecipeScreen from '../screens/AddRecipeScreen';
+import CookingHistoryScreen from '../screens/CookingHistoryScreen';
+import ShoppingListScreen from '../screens/ShoppingListScreen';
 
 // Importujemy kontekst uwierzytelniania
 import { useAuth } from '../config/AuthContext';
@@ -30,6 +32,8 @@ const AuthenticatedStack = () => {
       <Stack.Screen name="Favorites" component={FavoritesScreen} />
       <Stack.Screen name="Preferences" component={PreferencesScreen} />
       <Stack.Screen name="AddRecipe" component={AddRecipeScreen} />
+      <Stack.Screen name="CookingHistory" component={CookingHistoryScreen} />
+      <Stack.Screen name="ShoppingList" component={ShoppingListScreen} />
     </Stack.Navigator>
   );
 };

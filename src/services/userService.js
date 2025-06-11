@@ -140,3 +140,38 @@ export const getUserFavoriteIds = async (uid) => {
     return [];
   }
 }; 
+
+// Pobieranie preferencji żywieniowych użytkownika
+export const getUserDietaryPreferences = async (uid) => {
+  try {
+    const userData = await getUserData(uid);
+    if (userData && userData.dietaryPreferences) {
+      return userData.dietaryPreferences;
+    }
+    return [];
+  } catch (error) {
+    console.error('Błąd podczas pobierania preferencji żywieniowych:', error);
+    return [];
+  }
+};
+
+// Aktualizacja preferencji żywieniowych użytkownika
+export const updateDietaryPreferences = async (uid, preferences) => {
+  try {
+    console.log(`Aktualizacja preferencji żywieniowych dla użytkownika ${uid}: ${JSON.stringify(preferences)}`);
+    const userRef = doc(db, USERS_COLLECTION, uid);
+    
+    // Upewniamy się, że preferencje są tablicą
+    const validPreferences = Array.isArray(preferences) ? preferences : [];
+    
+    await updateDoc(userRef, {
+      dietaryPreferences: validPreferences
+    });
+    
+    console.log('Preferencje żywieniowe zaktualizowane pomyślnie');
+    return true;
+  } catch (error) {
+    console.error('Błąd podczas aktualizacji preferencji żywieniowych:', error);
+    throw error; // Rzucamy błąd, aby móc go obsłużyć w komponencie
+  }
+};

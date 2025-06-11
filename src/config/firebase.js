@@ -27,4 +27,9 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const auth = firebase.auth();
 
+// Debugowanie Firebase Storage
+console.log('Firebase Storage inicjalizacja:', {
+  storageBucket: storage.app.options.storageBucket
+});
+
 export { auth, db, storage }; 

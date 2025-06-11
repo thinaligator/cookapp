@@ -50,29 +50,39 @@ const PreferencesScreen = ({ navigation }) => {
     
     try {
       setLoading(true);
-      await updateDietaryPreferences(currentUser.uid, dietaryPreferences);
+      console.log(`Zapisywanie preferencji dla użytkownika ${currentUser.uid}: ${JSON.stringify(dietaryPreferences)}`);
+      const result = await updateDietaryPreferences(currentUser.uid, dietaryPreferences);
       
-      // Krótki alert informujący o zapisaniu preferencji
-      Alert.alert(
-        'Sukces', 
-        'Preferencje żywieniowe zostały zapisane. Przepisy zostaną odfiltrowane.',
-        [
-          { 
-            text: 'OK', 
-            onPress: () => {
-              // Resetujemy nawigację do ekranu głównego, co wymusi jego pełne przeładowanie
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'Home' }],
-              });
+      if (result) {
+        // Krótki alert informujący o zapisaniu preferencji
+        Alert.alert(
+          'Sukces', 
+          'Preferencje żywieniowe zostały zapisane. Przepisy zostaną odfiltrowane.',
+          [
+            { 
+              text: 'OK', 
+              onPress: () => {
+                // Resetujemy nawigację do ekranu głównego, co wymusi jego pełne przeładowanie
+                navigation.reset({
+                  index: 0,
+                  routes: [{ name: 'Home' }],
+                });
+              }
             }
-          }
-        ],
-        { cancelable: false }
-      );
+          ],
+          { cancelable: false }
+        );
+      } else {
+        throw new Error('Nie udało się zapisać preferencji');
+      }
     } catch (error) {
       console.error('Błąd podczas zapisywania preferencji:', error);
-      Alert.alert('Błąd', 'Nie udało się zapisać preferencji');
+      Alert.alert(
+        'Błąd', 
+        `Nie udało się zapisać preferencji: ${error.message || 'Nieznany błąd'}`,
+        [{ text: 'OK' }]
+      );
+    } finally {
       setLoading(false);
     }
   };

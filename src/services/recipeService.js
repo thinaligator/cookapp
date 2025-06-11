@@ -22,27 +22,52 @@ export const getRecipes = async (limitCount = 20, dietaryPreferences = []) => {
   try {
     // Uproszczone zapytanie bez filtrowania i sortowania
     const recipesCollection = collection(db, RECIPES_COLLECTION);
+    
+    // Dodajemy logging dla debugowania
+    console.log(`Pobieranie przepisów z kolekcji ${RECIPES_COLLECTION}...`);
+    
     const recipesSnapshot = await getDocs(recipesCollection);
+    
+    console.log(`Pobrano ${recipesSnapshot.docs.length} dokumentów z Firestore`);
+    
+    if (recipesSnapshot.docs.length === 0) {
+      console.log("Nie znaleziono żadnych przepisów w bazie danych!");
+      return [];
+    }
+    
+    // Sprawdźmy pierwsze kilka dokumentów, żeby zobaczyć ich strukturę
+    recipesSnapshot.docs.slice(0, 3).forEach((doc, index) => {
+      console.log(`Dokument ${index + 1} (ID: ${doc.id}):`);
+      console.log(JSON.stringify(doc.data(), null, 2));
+    });
     
     let recipes = recipesSnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     }));
     
+    console.log(`Zmapowano ${recipes.length} przepisów`);
+    
     // Filtrujemy przepisy na podstawie preferencji żywieniowych użytkownika
     if (dietaryPreferences && dietaryPreferences.length > 0) {
+      const beforeCount = recipes.length;
       recipes = filterRecipesByDietaryPreferences(recipes, dietaryPreferences);
+      console.log(`Filtracja po preferencjach: ${beforeCount} -> ${recipes.length} przepisów`);
     }
     
     // Sortujemy przepisy według oceny (od najwyższej do najniższej)
     // Przepisy bez oceny (avgRating undefined lub 0) będą na końcu
-    return recipes.sort((a, b) => {
+    const sortedRecipes = recipes.sort((a, b) => {
       const ratingA = a.avgRating || 0;
       const ratingB = b.avgRating || 0;
       return ratingB - ratingA;
     });
+    
+    console.log(`Zwracam ${sortedRecipes.length} przepisów`);
+    return sortedRecipes;
   } catch (error) {
     console.error('Błąd podczas pobierania przepisów:', error);
+    console.error(error.stack); // Wypisz pełny stack trace błędu
     return [];
   }
 };

@@ -1,16 +1,56 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Modal, Vibration } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Modal, Vibration, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { COLORS } from '../config/colors';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+
+// Konfiguracja zachowania powiadomień
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 const KitchenTimer = ({ visible, onClose, initialTitle = '', initialMinutes = 0, initialSeconds = 0, autoStart = false, editable = true }) => {
   const [minutes, setMinutes] = useState('');
   const [seconds, setSeconds] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [timeLeft, setTimeLeft] = useState(0);
+  const [hasNotificationPermission, setHasNotificationPermission] = useState(false);
   const intervalRef = useRef(null);
   const firstRenderRef = useRef(true);
+  const notificationIdRef = useRef(null);
   const isFromRecipe = initialMinutes > 0 || initialSeconds > 0;
+  
+  // Sprawdzenie uprawnień do powiadomień
+  useEffect(() => {
+    const checkNotificationPermissions = async () => {
+      if (Platform.OS === 'android') {
+        // Dla Androida ustawiamy kanał powiadomień
+        await Notifications.setNotificationChannelAsync('timer-channel', {
+          name: 'Timery kuchenne',
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 250, 250, 250],
+          sound: true,
+        });
+      }
+      
+      // Sprawdzamy uprawnienia
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== 'granted') {
+        // Jeśli nie mamy uprawnień, prosimy o nie
+        const { status: newStatus } = await Notifications.requestPermissionsAsync();
+        setHasNotificationPermission(newStatus === 'granted');
+      } else {
+        setHasNotificationPermission(true);
+      }
+    };
+    
+    checkNotificationPermissions();
+  }, []);
 
   // Resetowanie stanu przy otwarciu modala
   useEffect(() => {
@@ -39,11 +79,43 @@ const KitchenTimer = ({ visible, onClose, initialTitle = '', initialMinutes = 0,
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
+      
+      // Anuluj zaplanowane powiadomienie, jeśli istnieje
+      if (notificationIdRef.current) {
+        Notifications.cancelScheduledNotificationAsync(notificationIdRef.current)
+          .catch(err => console.error('Błąd anulowania powiadomienia:', err));
+        notificationIdRef.current = null;
+      }
     };
   }, []);
 
+  // Funkcja do wysyłania powiadomienia natychmiast
+  const sendImmediateNotification = async (title, message) => {
+    if (!hasNotificationPermission) {
+      console.log('Brak uprawnień do powiadomień');
+      return;
+    }
+    
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: title,
+          body: message,
+          sound: true,
+          priority: Notifications.AndroidNotificationPriority.HIGH,
+          vibrate: [0, 250, 250, 250],
+        },
+        trigger: null, // null oznacza natychmiastowe powiadomienie
+      });
+      
+      console.log('Wysłano natychmiastowe powiadomienie');
+    } catch (error) {
+      console.error('Błąd podczas wysyłania powiadomienia:', error);
+    }
+  };
+
   // Funkcja do powiadomienia użytkownika po zakończeniu timera
-  const notifyTimerEnd = () => {
+  const notifyTimerEnd = async () => {
     try {
       console.log('Timer zakończony - powiadamianie użytkownika');
       
@@ -56,6 +128,10 @@ const KitchenTimer = ({ visible, onClose, initialTitle = '', initialMinutes = 0,
         'Czas minął!',
         [{ text: 'OK', onPress: () => {} }]
       );
+      
+      // Wysyłamy natychmiastowe powiadomienie
+      const timerTitle = initialTitle || 'Timer kuchenny';
+      await sendImmediateNotification('Timer zakończony', `${timerTitle} - czas upłynął!`);
     } catch (error) {
       console.error('Błąd podczas powiadamiania o zakończeniu timera:', error);
     }
@@ -80,7 +156,7 @@ const KitchenTimer = ({ visible, onClose, initialTitle = '', initialMinutes = 0,
   };
 
   // Uruchomienie timera
-  const startTimer = () => {
+  const startTimer = async () => {
     // Jeśli timer jest z przepisu, używamy początkowych wartości
     const min = isFromRecipe ? initialMinutes : (parseInt(minutes) || 0);
     const sec = isFromRecipe ? initialSeconds : (parseInt(seconds) || 0);
@@ -96,6 +172,16 @@ const KitchenTimer = ({ visible, onClose, initialTitle = '', initialMinutes = 0,
     // Ustaw czas pozostały
     setTimeLeft(totalSeconds);
     setIsRunning(true);
+    
+    // Anuluj poprzednie powiadomienie, jeśli istnieje
+    if (notificationIdRef.current) {
+      try {
+        await Notifications.cancelScheduledNotificationAsync(notificationIdRef.current);
+        notificationIdRef.current = null;
+      } catch (error) {
+        console.error('Błąd podczas anulowania powiadomienia:', error);
+      }
+    }
     
     // Uruchom timer lokalnie
     intervalRef.current = setInterval(() => {
@@ -120,10 +206,21 @@ const KitchenTimer = ({ visible, onClose, initialTitle = '', initialMinutes = 0,
   };
 
   // Zatrzymanie timera
-  const stopTimer = () => {
+  const stopTimer = async () => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
+    }
+    
+    // Anuluj zaplanowane powiadomienie
+    if (notificationIdRef.current) {
+      try {
+        await Notifications.cancelScheduledNotificationAsync(notificationIdRef.current);
+        console.log(`Anulowano powiadomienie z ID: ${notificationIdRef.current}`);
+        notificationIdRef.current = null;
+      } catch (error) {
+        console.error('Błąd podczas anulowania powiadomienia:', error);
+      }
     }
     
     setIsRunning(false);

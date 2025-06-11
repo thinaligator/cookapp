@@ -48,25 +48,57 @@ export const optimizeImage = async (uri) => {
  */
 export const uploadImage = async (uri, path, filename) => {
   try {
+    console.log(`Rozpoczynam upload obrazu. URI: ${uri}, ścieżka: ${path}, nazwa pliku: ${filename}`);
+    
+    // Sprawdź konfigurację Firebase Storage
+    console.log('Firebase Storage config:', JSON.stringify({
+      storageBucket: storage._bucket ? storage._bucket.bucket : 'Nie znaleziono bucketa'
+    }));
+    
     // Optymalizacja obrazu przed przesłaniem
     const optimizedUri = await optimizeImage(uri);
+    console.log('Zoptymalizowano obraz, nowe URI:', optimizedUri);
     
     // Pobranie danych obrazu jako blob
     const response = await fetch(optimizedUri);
+    if (!response.ok) {
+      throw new Error(`Błąd podczas pobierania obrazu: ${response.status} ${response.statusText}`);
+    }
+    
     const blob = await response.blob();
+    console.log(`Utworzono blob o rozmiarze: ${blob.size} bajtów`);
     
     // Utworzenie referencji do miejsca przechowywania w Firebase Storage
-    const storageRef = ref(storage, `${path}${filename}`);
+    const storagePath = `${path}${filename}`;
+    console.log(`Tworzę referencję do Firebase Storage: ${storagePath}`);
+    const storageRef = ref(storage, storagePath);
     
     // Przesłanie pliku
+    console.log('Rozpoczynam przesyłanie pliku...');
     const snapshot = await uploadBytes(storageRef, blob);
-    console.log('Przesłano zdjęcie!');
+    console.log('Przesłano zdjęcie!', snapshot);
     
     // Pobranie URL do przesłanego pliku
+    console.log('Pobieram URL do przesłanego pliku...');
     const downloadURL = await getDownloadURL(snapshot.ref);
+    console.log('URL do pobrania obrazu:', downloadURL);
+    
     return downloadURL;
   } catch (error) {
     console.error('Błąd podczas przesyłania obrazu:', error);
+    console.error('Stack trace:', error.stack);
+    
+    // Wypisz szczegóły błędu Firebase jeśli dostępne
+    if (error.code) {
+      console.error('Kod błędu Firebase:', error.code);
+    }
+    if (error.message) {
+      console.error('Komunikat błędu:', error.message);
+    }
+    if (error.serverResponse) {
+      console.error('Odpowiedź serwera:', error.serverResponse);
+    }
+    
     throw error;
   }
 };

@@ -34,6 +34,9 @@ const AVAILABLE_TAGS = [
   'fit', 'comfort food', 'fastfood', 'na grilla'
 ];
 
+// Poziomy trudności
+const DIFFICULTY_LEVELS = ['Łatwy', 'Średni', 'Trudny'];
+
 // Mapowanie słów kluczowych z tytułów na tagi
 const RECIPE_TAG_MAPPING = {
   'pizza': ['kuchnia włoska', 'fastfood'],
@@ -87,6 +90,7 @@ const HomeScreen = ({ navigation, route }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchActive, setSearchActive] = useState(false);
   const [selectedTag, setSelectedTag] = useState(null);
+  const [selectedDifficulty, setSelectedDifficulty] = useState(null);
   
   const { currentUser, logout } = useAuth();
   const { favoriteRecipes, loading: favoritesLoading } = useFavorites();
@@ -138,7 +142,7 @@ const HomeScreen = ({ navigation, route }) => {
       if (currentUser) {
         userDietaryPreferences = await getUserDietaryPreferences(currentUser.uid);
         console.log("Pobrane preferencje żywieniowe dla użytkownika", currentUser.displayName || currentUser.email, ":", JSON.stringify(userDietaryPreferences));
-        
+      
         // Sprawdź, czy zawierają "pierś z kurczaka" lub podobne
         const chickenRelated = userDietaryPreferences.filter(pref => 
           pref.toLowerCase().includes('kurczak') || 
@@ -331,6 +335,7 @@ const HomeScreen = ({ navigation, route }) => {
     console.log(`Kliknięto kategorię: ${category}`);
     setSelectedCategory(category);
     setSelectedTag(null);
+    setSelectedDifficulty(null);
     setLoading(true);
     
     try {
@@ -361,66 +366,47 @@ const HomeScreen = ({ navigation, route }) => {
 
   // Obsługa filtrowania po tagu
   const handleTagPress = async (tag) => {
-    console.log(`\n\n======= KLIKNIĘTO TAG: ${tag} =======`);
+    console.log(`Filtrowanie według tagu: ${tag}`);
     setSelectedTag(tag);
     setSelectedCategory(null);
-    setLoading(true);
+    setSelectedDifficulty(null);
+    setSearchActive(true);
     
     try {
-      // Pobieranie przepisów z wybranym tagiem
-      const taggedRecipes = await getRecipesByTag(tag);
-      console.log(`Otrzymano ${taggedRecipes.length} przepisów po filtracji tagiem ${tag}`);
-      
-      // Sprawdź, czy faktycznie mamy przepisy z tym tagiem
-      if (taggedRecipes.length === 0) {
-        console.log(`Nie znaleziono przepisów z tagiem: ${tag}`);
-        setFilteredRecipes([]);
-        setSearchActive(true);
-        return;
-      }
-      
-      // Sprawdź, które przepisy mają tagi w poprawnym formacie
-      console.log("Sprawdzanie formatów tagów w otrzymanych przepisach:");
-      taggedRecipes.forEach(recipe => {
-        console.log(`Przepis "${recipe.title}":`);
-        console.log(`  tagi: ${typeof recipe.tags}, ${Array.isArray(recipe.tags) ? 'jest tablicą' : 'nie jest tablicą'}`);
-        if (recipe.tags && Array.isArray(recipe.tags)) {
-          console.log(`  zawartość: ${recipe.tags.join(', ')}`);
-          const hasTag = recipe.tags.some(t => t.toLowerCase() === tag.toLowerCase());
-          console.log(`  czy zawiera tag '${tag}': ${hasTag ? 'TAK' : 'NIE'}`);
-        }
-      });
-      
-      // Sprawdzamy, czy każdy przepis faktycznie ma ten tag
-      const verifiedRecipes = taggedRecipes.filter(recipe => 
-        recipe.tags && 
-        Array.isArray(recipe.tags) && 
-        recipe.tags.some(t => t.toLowerCase() === tag.toLowerCase())
-      );
-      
-      console.log(`Po dodatkowej weryfikacji: ${verifiedRecipes.length} przepisów ma tag ${tag}`);
-      
-      if (verifiedRecipes.length === 0) {
-        console.log(`Po weryfikacji nie znaleziono przepisów z tagiem: ${tag}`);
-        setFilteredRecipes([]);
-        setSearchActive(true);
-        return;
-      }
-      
-      // Sortowanie przepisów według ocen
-      const sortedRecipes = sortRecipesByRating(verifiedRecipes);
-      
-      // Tworzymy listę przepisów do wyświetlenia
-      setFilteredRecipes(sortedRecipes);
-      setSearchActive(true);
-      console.log(`Wyświetlanie ${sortedRecipes.length} przepisów z tagiem ${tag}`);
-      console.log("======= ZAKOŃCZONO FILTROWANIE =======\n\n");
+      setLoading(true);
+      const tagRecipes = await getRecipesByTag(tag);
+      console.log(`Znaleziono ${tagRecipes.length} przepisów z tagiem "${tag}"`);
+      setFilteredRecipes(tagRecipes);
+      setLoading(false);
     } catch (error) {
-      console.error("Błąd podczas filtrowania po tagu:", error);
+      console.error(`Błąd podczas filtrowania według tagu "${tag}":`, error);
       setFilteredRecipes([]);
-    } finally {
       setLoading(false);
     }
+  };
+
+  // Obsługa filtrowania według trudności
+  const handleDifficultyPress = (difficulty) => {
+    console.log(`Filtrowanie według trudności: ${difficulty}`);
+    
+    // Jeśli wybrano już ten poziom trudności, wyczyść filtr
+    if (selectedDifficulty === difficulty) {
+      setSelectedDifficulty(null);
+      setFilteredRecipes(recipes);
+      setSearchActive(false);
+      return;
+    }
+    
+    // Ustaw wybrany poziom trudności i wyczyść inne filtry
+    setSelectedDifficulty(difficulty);
+    setSelectedTag(null);
+    setSelectedCategory(null);
+    setSearchActive(true);
+    
+    // Filtruj przepisy według trudności
+    const filtered = recipes.filter(recipe => recipe.difficulty === difficulty);
+    console.log(`Znaleziono ${filtered.length} przepisów o trudności "${difficulty}"`);
+    setFilteredRecipes(filtered);
   };
 
   // Obsługa wyszukiwania
@@ -455,6 +441,7 @@ const HomeScreen = ({ navigation, route }) => {
     console.log('Czyszczenie filtrów');
     setSelectedCategory(null);
     setSelectedTag(null);
+    setSelectedDifficulty(null);
     setFilteredRecipes(recipes);
     setSearchActive(false);
   };
@@ -470,10 +457,10 @@ const HomeScreen = ({ navigation, route }) => {
         console.log("Wylogowanie zakończone pomyślnie");
       } else {
         console.error("Błąd podczas wylogowywania:", result.error);
-        Alert.alert(
+      Alert.alert(
           "Błąd wylogowania",
           "Nie udało się wylogować: " + result.error
-        );
+      );
       }
     } catch (error) {
       console.error("Nieoczekiwany błąd podczas wylogowywania:", error);
@@ -556,13 +543,13 @@ const HomeScreen = ({ navigation, route }) => {
       {/* Nagłówek */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-          <Text style={styles.logoutText}>Wyloguj</Text>
-        </TouchableOpacity>
+            <Text style={styles.logoutText}>Wyloguj</Text>
+          </TouchableOpacity>
         <Text style={styles.title}>Kucharz</Text>
         <TouchableOpacity onPress={toggleMenu} style={styles.menuButton}>
           <View style={styles.menuIconContainer}>
             <Ionicons name="menu" size={28} color={COLORS.primary} />
-          </View>
+        </View>
         </TouchableOpacity>
       </View>
       
@@ -596,6 +583,15 @@ const HomeScreen = ({ navigation, route }) => {
               <Text style={styles.menuItemText}>Dodaj przepis</Text>
             </TouchableOpacity>
             
+            {/* Lista zakupów */}
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={() => navigateToScreen('ShoppingList')}
+            >
+              <Ionicons name="cart-outline" size={24} color={COLORS.primary} />
+              <Text style={styles.menuItemText}>Lista zakupów</Text>
+            </TouchableOpacity>
+
             {/* Historia gotowania */}
             <TouchableOpacity 
               style={styles.menuItem}
@@ -654,7 +650,9 @@ const HomeScreen = ({ navigation, route }) => {
                       ? `Kategoria: ${selectedCategory}` 
                       : selectedTag
                         ? `Tag: ${selectedTag}`
-                        : `Znaleziono ${filteredRecipes.length} przepisów`}
+                        : selectedDifficulty
+                          ? `Trudność: ${selectedDifficulty}`
+                          : `Znaleziono ${filteredRecipes.length} przepisów`}
                 </Text>
                   <TouchableOpacity onPress={clearFilters}>
                   <Text style={styles.clearText}>Wyczyść filtry</Text>
@@ -669,7 +667,9 @@ const HomeScreen = ({ navigation, route }) => {
                         ? `Przepisy z kategorii: ${selectedCategory}`
                         : selectedTag
                           ? `Przepisy z tagiem: ${selectedTag}`
-                          : 'Wyniki wyszukiwania'}
+                          : selectedDifficulty
+                            ? `Przepisy o trudności: ${selectedDifficulty}`
+                            : 'Wyniki wyszukiwania'}
               </Text>
               
               {filteredRecipes.length > 0 ? (
@@ -701,6 +701,10 @@ const HomeScreen = ({ navigation, route }) => {
                   ) : selectedTag ? (
                     <Text style={styles.activeFilterText}>
                       Tag: <Text style={styles.filterHighlight}>{selectedTag}</Text>
+                    </Text>
+                  ) : selectedDifficulty ? (
+                    <Text style={styles.activeFilterText}>
+                      Trudność: <Text style={styles.filterHighlight}>{selectedDifficulty}</Text>
                     </Text>
                   ) : null}
                   <TouchableOpacity onPress={clearFilters} style={styles.clearFilterButton}>
@@ -758,6 +762,30 @@ const HomeScreen = ({ navigation, route }) => {
                   </ScrollView>
                 </View>
                 
+                {/* Poziomy trudności */}
+                <View style={styles.difficultyContainer}>
+                  <Text style={styles.sectionTitle}>Trudność</Text>
+                  <View style={styles.difficultyButtonsContainer}>
+                    {DIFFICULTY_LEVELS.map((difficulty, index) => (
+                      <TouchableOpacity 
+                        key={index}
+                        style={[
+                          styles.difficultyButton,
+                          selectedDifficulty === difficulty ? styles.selectedDifficulty : null
+                        ]}
+                        onPress={() => handleDifficultyPress(difficulty)}
+                      >
+                        <Text style={[
+                          styles.difficultyText,
+                          selectedDifficulty === difficulty ? styles.selectedDifficultyText : null
+                        ]}>
+                          {difficulty}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+                
                 {/* Wszystkie przepisy - teraz poniżej kategorii, tagów i ulubionych */}
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>Wszystkie przepisy</Text>
@@ -781,7 +809,7 @@ const HomeScreen = ({ navigation, route }) => {
                       ))}
                     </View>
                   )}
-              </View>
+                </View>
               </>
             )}
           </>
@@ -1060,6 +1088,40 @@ const styles = StyleSheet.create({
   selectedTagText: {
     fontWeight: 'bold',
     color: COLORS.white,
+  },
+  difficultyContainer: {
+    marginBottom: 20,
+    paddingHorizontal: 16,
+  },
+  difficultyButtonsContainer: {
+    flexDirection: 'row',
+    paddingVertical: 10,
+    justifyContent: 'flex-start',
+  },
+  difficultyButton: {
+    padding: 12,
+    paddingHorizontal: 20,
+    backgroundColor: COLORS.secondary,
+    borderRadius: 8,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: COLORS.secondary,
+  },
+  difficultyText: {
+    color: COLORS.white,
+    fontWeight: '500',
+    fontSize: 16,
+  },
+  selectedDifficulty: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  selectedDifficultyText: {
+    fontWeight: 'bold',
+    color: COLORS.white,
+  },
+  centeredTitle: {
+    textAlign: 'center',
   },
 });
 

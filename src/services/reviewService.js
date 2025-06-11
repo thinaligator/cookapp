@@ -152,6 +152,45 @@ export const deleteReview = async (reviewId, recipeId) => {
   }
 };
 
+// Pobieranie wszystkich ocen użytkownika (historia gotowania)
+export const getUserReviewedRecipes = async (userId) => {
+  try {
+    console.log(`Pobieranie ocenionych przepisów dla użytkownika: ${userId}`);
+    
+    // Tworzymy zapytanie o oceny danego użytkownika
+    const reviewsQuery = query(
+      collection(db, REVIEWS_COLLECTION),
+      where("userId", "==", userId)
+    );
+    
+    const reviewsSnapshot = await getDocs(reviewsQuery);
+    const reviews = reviewsSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    
+    console.log(`Znaleziono ${reviews.length} ocenionych przepisów`);
+    
+    // Sortujemy lokalnie po dacie (od najnowszych)
+    return reviews.sort((a, b) => {
+      // Najpierw sprawdzamy updatedAt (jeśli ocena była aktualizowana)
+      if (a.updatedAt && b.updatedAt) {
+        return b.updatedAt.seconds - a.updatedAt.seconds;
+      }
+      
+      // Jeśli brak updatedAt, używamy createdAt
+      if (a.createdAt && b.createdAt) {
+        return b.createdAt.seconds - a.createdAt.seconds;
+      }
+      
+      return 0;
+    });
+  } catch (error) {
+    console.error('Błąd podczas pobierania ocenionych przepisów użytkownika:', error);
+    return [];
+  }
+};
+
 // Funkcja do aktualizacji średniej oceny przepisu
 const updateRecipeRating = async (recipeId) => {
   try {

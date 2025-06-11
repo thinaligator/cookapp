@@ -10,6 +10,7 @@ import StarRating from '../components/StarRating';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { getImageFromCache } from '../services/imageCacheService';
 import KitchenTimer from '../components/KitchenTimer';
+import { addIngredientsToShoppingList } from '../services/shoppingListService';
 import { useFocusEffect } from '@react-navigation/native';
 
 // Komponent pojedynczej recenzji
@@ -141,12 +142,20 @@ const RecipeDetailScreen = React.memo(({ route, navigation }) => {
                   }
                   
                   if (typeof instruction === 'object' && instruction.hasTimer) {
-                    processedInstructions.push(instruction);
+                    // Dodaję sprawdzenie parametrów timera
+                    const timerMinutes = instruction.timerMinutes || 0;
+                    const timerSeconds = instruction.timerSeconds || 0;
+                    processedInstructions.push({
+                      text: instruction.text || '',
+                      hasTimer: true,
+                      timerMinutes: timerMinutes,
+                      timerSeconds: timerSeconds
+                    });
                     continue;
                   }
                   
                   if (typeof instruction === 'object' && instruction.text) {
-                    processedInstructions.push({ text: instruction.text });
+                    processedInstructions.push(instruction);
                     continue;
                   }
                   
@@ -209,9 +218,9 @@ const RecipeDetailScreen = React.memo(({ route, navigation }) => {
               }
             } catch (error) {
               console.error("Błąd podczas pobierania szczegółów przepisu:", error);
-              setRecipe(sampleRecipe);
+    setRecipe(sampleRecipe);
             } finally {
-              setLoading(false);
+    setLoading(false);
               // Oznaczamy, że dane zostały załadowane
               dataLoadedRef.current = true;
             }
@@ -380,14 +389,58 @@ const RecipeDetailScreen = React.memo(({ route, navigation }) => {
   const closeReviewModal = () => {
     setModalVisible(false);
   };
+  
+  // Funkcja do dodawania wszystkich składników do listy zakupów
+  const handleAddAllIngredientsToShoppingList = async () => {
+    try {
+      if (!recipe || !recipe.ingredients || recipe.ingredients.length === 0) {
+        Alert.alert('Informacja', 'Ten przepis nie zawiera składników do dodania do listy zakupów.');
+        return;
+      }
+      
+      const addedCount = await addIngredientsToShoppingList(recipe.ingredients, recipe.title);
+      
+      if (addedCount > 0) {
+        Alert.alert(
+          'Dodano do listy zakupów',
+          `Dodano ${addedCount} składników do Twojej listy zakupów.`,
+          [
+            {
+              text: 'OK',
+              style: 'default'
+            },
+            {
+              text: 'Przejdź do listy',
+              onPress: () => navigation.navigate('ShoppingList')
+            }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Informacja',
+          'Wszystkie składniki z tego przepisu są już na Twojej liście zakupów.'
+        );
+      }
+    } catch (error) {
+      console.error('Błąd podczas dodawania składników do listy zakupów:', error);
+      Alert.alert(
+        'Błąd',
+        'Nie udało się dodać składników do listy zakupów. Spróbuj ponownie.'
+      );
+    }
+  };
 
   // Obsługa otwarcia timera
   const handleOpenTimer = (title, minutes, seconds) => {
     try {
+      console.log(`Otwieranie timera: ${title}, ${minutes} min, ${seconds} sek`);
+      
       // Upewnij się, że parametry są prawidłowe
       const safeTitle = title || 'Timer';
       const safeMinutes = !isNaN(minutes) ? parseInt(minutes, 10) : 0;
       const safeSeconds = !isNaN(seconds) ? parseInt(seconds, 10) : 0;
+      
+      console.log(`Wartości po konwersji: ${safeTitle}, ${safeMinutes} min, ${safeSeconds} sek`);
       
       // Ustaw stan timera
       setTimerTitle(safeTitle);
@@ -511,9 +564,72 @@ const RecipeDetailScreen = React.memo(({ route, navigation }) => {
       return null;
     };
     
+    // Sprawdzamy czy mamy nowy format instrukcji z timerami
+    const hasStructuredInstructions = recipe.instructions.some(
+      instr => typeof instr === 'object' && instr.hasTimer === true
+    );
+
+    if (hasStructuredInstructions) {
+      // Używamy struktury z timerami
+      return (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Instrukcje przygotowania</Text>
+          
+          {recipe.instructions.map((instruction, index) => {
+            // Bezpośrednio używamy informacji o timerze z obiektu
+            const hasTimer = instruction.hasTimer === true;
+            const timerMinutes = instruction.timerMinutes || 0;
+            const timerSeconds = instruction.timerSeconds || 0;
+            const instructionText = instruction.text || '';
+            
+            return (
+              <View key={index} style={styles.instructionStep}>
+                <View style={styles.instructionStepContent}>
+                  <Text style={styles.instructionStepNumber}>{index + 1}</Text>
+                  <Text style={styles.instructionStepText}>{instructionText}</Text>
+                </View>
+                
+                {/* Przycisk timera jeśli instrukcja ma timer */}
+                {hasTimer && (
+                  <TouchableOpacity
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      backgroundColor: COLORS.white,
+                      borderRadius: 15,
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      borderWidth: 1,
+                      borderColor: COLORS.primary,
+                      marginLeft: 8,
+                    }}
+                    onPress={() => handleOpenTimer(`Krok ${index + 1}`, timerMinutes, timerSeconds)}
+                  >
+                    <Icon name="timer-outline" size={16} color={COLORS.primary} />
+                    <Text style={{fontSize: 12, color: COLORS.primary, marginLeft: 4, fontWeight: '500'}}>
+                      {timerMinutes} min {timerSeconds > 0 ? `${timerSeconds} sek` : ''}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })}
+        </View>
+      );
+    }
+    
+    // Stara logika dla instrukcji bez struktury z timerami
     // Połącz wszystkie instrukcje w jeden tekst
     const allInstructionsText = recipe.instructions
-      .map(instruction => cleanInstructionText(instruction.text || ''))
+      .map(instruction => {
+        if (typeof instruction === 'string') {
+          return cleanInstructionText(instruction);
+        } else if (instruction && typeof instruction === 'object' && instruction.text) {
+          return cleanInstructionText(instruction.text);
+        } else {
+          return '';
+        }
+      })
       .join('\n');
     
     // Podziel tekst na linie i odfiltruj puste linie
@@ -678,8 +794,8 @@ const RecipeDetailScreen = React.memo(({ route, navigation }) => {
                   <Text style={styles.infoValue}>{recipe.prepTime || 'Brak informacji'}</Text>
                 </View>
                 
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoLabel}>Czas gotowania</Text>
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Czas gotowania</Text>
                   <Text style={styles.infoValue}>{recipe.cookTime || 'Brak informacji'}</Text>
                 </View>
             </View>
@@ -695,9 +811,18 @@ const RecipeDetailScreen = React.memo(({ route, navigation }) => {
 
             {/* Składniki */}
           <View style={styles.section}>
+            <View style={styles.sectionTitleRow}>
             <Text style={styles.sectionTitle}>Składniki</Text>
-              {recipe.ingredients && recipe.ingredients.map((ingredient, index) => (
-                <Text key={index} style={styles.ingredientItem}>• {ingredient}</Text>
+              <TouchableOpacity
+                style={styles.addAllToCartButton}
+                onPress={handleAddAllIngredientsToShoppingList}
+              >
+                <Icon name="cart-outline" size={18} color={COLORS.white} />
+                <Text style={styles.addAllToCartButtonText}>Dodaj do listy zakupów</Text>
+              </TouchableOpacity>
+            </View>
+            {recipe.ingredients && recipe.ingredients.map((ingredient, index) => (
+              <Text key={index} style={styles.ingredientItem}>• {ingredient}</Text>
             ))}
           </View>
 
@@ -941,10 +1066,30 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontWeight: '500',
   },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+  },
   ingredientItem: {
     fontSize: 16,
-    marginBottom: 10,
     lineHeight: 22,
+    marginBottom: 10,
+  },
+  addAllToCartButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primary,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+  },
+  addAllToCartButtonText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '500',
+    marginLeft: 5,
   },
   instructionStep: {
     flexDirection: 'row',
